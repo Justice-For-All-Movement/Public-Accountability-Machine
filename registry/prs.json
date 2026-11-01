@@ -20,19 +20,18 @@
         "Preserve approved source and stable roadmap identifiers.",
         "Validate static foundation metadata and stopping boundaries.",
         "Push and record foundation; stop operational application work."
-      ]
+      ],
+      "legacyWorkUnitId": "PAM-000",
+      "externalDependencies": [],
+      "externalPrerequisites": []
     },
     {
-      "id": "AM-07.01",
+      "id": "AM-07-01",
       "title": "Objective and dependency planner",
       "origin": "original",
       "prs": [],
       "contributingPrs": [],
-      "dependsOn": [
-        "AM-01.04",
-        "AM-05.03",
-        "AM-06.08"
-      ],
+      "dependsOn": [],
       "requirements": [
         "R13",
         "R25",
@@ -42,16 +41,23 @@
         "Cycle, missing-input and forbidden-action proposals are rejected before execution.",
         "Provide the authorized visual or table view, source-bound test evidence and documented failure behavior."
       ],
-      "implementationStatus": "planned"
+      "implementationStatus": "planned",
+      "legacyWorkUnitId": "AM-07.01",
+      "externalDependencies": [],
+      "externalPrerequisites": [
+        "Required original cross-project milestone AM-01.04 is not yet mapped to a verified upstream repo/unit; block this unit until source evidence is linked",
+        "Required original cross-project milestone AM-05.03 is not yet mapped to a verified upstream repo/unit; block this unit until source evidence is linked",
+        "Required original cross-project milestone AM-06.08 is not yet mapped to a verified upstream repo/unit; block this unit until source evidence is linked"
+      ]
     },
     {
-      "id": "AM-07.02",
+      "id": "AM-07-02",
       "title": "Agent registry and capability broker",
       "origin": "original",
       "prs": [],
       "contributingPrs": [],
       "dependsOn": [
-        "AM-07.01"
+        "AM-07-01"
       ],
       "requirements": [
         "R13",
@@ -62,17 +68,20 @@
         "A researcher cannot send, publish, decrypt or spend outside its task grant.",
         "Provide the authorized visual or table view, source-bound test evidence and documented failure behavior."
       ],
-      "implementationStatus": "planned"
+      "implementationStatus": "planned",
+      "legacyWorkUnitId": "AM-07.02",
+      "externalDependencies": [],
+      "externalPrerequisites": []
     },
     {
-      "id": "AM-07.03",
+      "id": "AM-07-03",
       "title": "Persistent memory and checkpoints",
       "origin": "original",
       "prs": [],
       "contributingPrs": [],
       "dependsOn": [
-        "AM-07.01",
-        "AM-07.02"
+        "AM-07-01",
+        "AM-07-02"
       ],
       "requirements": [
         "R13",
@@ -83,17 +92,20 @@
         "A restarted agent resumes from a verified checkpoint without importing unrelated project memory.",
         "Provide the authorized visual or table view, source-bound test evidence and documented failure behavior."
       ],
-      "implementationStatus": "planned"
+      "implementationStatus": "planned",
+      "legacyWorkUnitId": "AM-07.03",
+      "externalDependencies": [],
+      "externalPrerequisites": []
     },
     {
-      "id": "AM-07.04",
+      "id": "AM-07-04",
       "title": "Autonomy modes and operator controls",
       "origin": "original",
       "prs": [],
       "contributingPrs": [],
       "dependsOn": [
-        "AM-07.01",
-        "AM-07.02"
+        "AM-07-01",
+        "AM-07-02"
       ],
       "requirements": [
         "R13",
@@ -104,16 +116,19 @@
         "Policy changes revoke stale work and all state transitions have visible reasons.",
         "Provide the authorized visual or table view, source-bound test evidence and documented failure behavior."
       ],
-      "implementationStatus": "planned"
+      "implementationStatus": "planned",
+      "legacyWorkUnitId": "AM-07.04",
+      "externalDependencies": [],
+      "externalPrerequisites": []
     },
     {
-      "id": "AM-07.05",
+      "id": "AM-07-05",
       "title": "Budget reservation and metering",
       "origin": "original",
       "prs": [],
       "contributingPrs": [],
       "dependsOn": [
-        "AM-07.01"
+        "AM-07-01"
       ],
       "requirements": [
         "R13",
@@ -124,17 +139,20 @@
         "Simultaneous jobs cannot overspend a shared cap through a check-then-act race.",
         "Provide the authorized visual or table view, source-bound test evidence and documented failure behavior."
       ],
-      "implementationStatus": "planned"
+      "implementationStatus": "planned",
+      "legacyWorkUnitId": "AM-07.05",
+      "externalDependencies": [],
+      "externalPrerequisites": []
     },
     {
-      "id": "AM-07.06",
+      "id": "AM-07-06",
       "title": "Effort lane scheduler",
       "origin": "original",
       "prs": [],
       "contributingPrs": [],
       "dependsOn": [
-        "AM-07.01",
-        "AM-07.05"
+        "AM-07-01",
+        "AM-07-05"
       ],
       "requirements": [
         "R13",
@@ -145,18 +163,21 @@
         "Unequal worker counts, retries and waiting replies do not hide lane allocation differences.",
         "Provide the authorized visual or table view, source-bound test evidence and documented failure behavior."
       ],
-      "implementationStatus": "planned"
+      "implementationStatus": "planned",
+      "legacyWorkUnitId": "AM-07.06",
+      "externalDependencies": [],
+      "externalPrerequisites": []
     },
     {
-      "id": "AM-07.07",
+      "id": "AM-07-07",
       "title": "Prompt injection and tool abuse evaluation",
       "origin": "original",
       "prs": [],
       "contributingPrs": [],
       "dependsOn": [
-        "AM-07.01",
-        "AM-07.02",
-        "AM-07.04"
+        "AM-07-01",
+        "AM-07-02",
+        "AM-07-04"
       ],
       "requirements": [
         "R13",
@@ -167,22 +188,25 @@
         "External instructions cannot change policy, leak a private case or trigger unauthorized outreach.",
         "Provide the authorized visual or table view, source-bound test evidence and documented failure behavior."
       ],
-      "implementationStatus": "planned"
+      "implementationStatus": "planned",
+      "legacyWorkUnitId": "AM-07.07",
+      "externalDependencies": [],
+      "externalPrerequisites": []
     },
     {
-      "id": "AM-07.08",
+      "id": "AM-07-08",
       "title": "Recovery and autonomy acceptance",
       "origin": "original",
       "prs": [],
       "contributingPrs": [],
       "dependsOn": [
-        "AM-07.01",
-        "AM-07.02",
-        "AM-07.03",
-        "AM-07.04",
-        "AM-07.05",
-        "AM-07.06",
-        "AM-07.07"
+        "AM-07-01",
+        "AM-07-02",
+        "AM-07-03",
+        "AM-07-04",
+        "AM-07-05",
+        "AM-07-06",
+        "AM-07-07"
       ],
       "requirements": [
         "R13",
@@ -193,7 +217,12 @@
         "A long synthetic investigation resumes after faults with no untracked effect or fabricated completion.",
         "Provide the authorized visual or table view, source-bound test evidence and documented failure behavior."
       ],
-      "implementationStatus": "planned"
+      "implementationStatus": "planned",
+      "legacyWorkUnitId": "AM-07.08",
+      "externalDependencies": [],
+      "externalPrerequisites": []
     }
-  ]
+  ],
+  "observedAt": "2026-11-01T20:45:00Z",
+  "pullRequests": []
 }
