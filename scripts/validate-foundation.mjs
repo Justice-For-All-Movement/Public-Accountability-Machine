@@ -19,13 +19,22 @@ export function validateRegistry(registry, approvedBacklog) {
   if (approved.length !== 8 || operational.length !== approved.length) {
     throw new TypeError('Approved orchestration roadmap changed');
   }
+  const canonical = (id) => id.replaceAll('.', '-');
+  const originalIds = new Set(approved.map(task => task.id));
   for (let i = 0; i < approved.length; i++) {
     const original = approved[i];
     const unit = operational[i];
-    if (unit.id !== original.id || unit.title !== original.title
+    const local = original.dependencies.filter(id => originalIds.has(id)).map(canonical);
+    const externalHolds = original.dependencies.filter(id => !originalIds.has(id))
+      .map(id => 'Required original cross-project milestone ' + id +
+        ' is not yet mapped to a verified upstream repo/unit; block this unit until source evidence is linked');
+    if (unit.legacyWorkUnitId !== original.id || unit.id !== canonical(original.id)
+        || unit.title !== original.title
         || unit.implementationStatus !== 'planned' || unit.prs.length !== 0
         || unit.contributingPrs.length !== 0
-        || JSON.stringify(unit.dependsOn) !== JSON.stringify(original.dependencies)
+        || JSON.stringify(unit.dependsOn) !== JSON.stringify(local)
+        || JSON.stringify(unit.externalPrerequisites) !== JSON.stringify(externalHolds)
+        || JSON.stringify(unit.externalDependencies) !== '[]'
         || JSON.stringify(unit.acceptanceCriteria) !== JSON.stringify(original.acceptance)
         || JSON.stringify(unit.requirements) !== JSON.stringify(original.requirements)) {
       throw new TypeError(`Original roadmap or planned status changed: ${original.id}`);
