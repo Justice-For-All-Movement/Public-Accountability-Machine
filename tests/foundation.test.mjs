@@ -59,7 +59,8 @@ test('stopping boundary, types, identity and unexpected fields are checked', () 
 test('original stable task IDs, dependencies, criteria and planned statuses cannot drift', () => {
   const mutations = [
     (r) => { r.units[1].id = 'PAM-001'; },
-    (r) => { r.units[1].dependsOn = []; },
+    (r) => { r.units[1].externalPrerequisites = []; },
+    (r) => { r.units[2].dependsOn = []; },
     (r) => { r.units[1].acceptanceCriteria = ['Different criterion']; },
     (r) => { r.units[1].requirements = []; },
     (r) => { r.units[1].implementationStatus = 'complete'; },
