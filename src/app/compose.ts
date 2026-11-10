@@ -1,7 +1,7 @@
 // Composes the engines into one runtime. Each engine keeps its own schema and is reached only through its service
 // interface (`createEngine` / `routes`). Engines are loaded from ./engines/<short> (see scripts/bootstrap-engines.mjs);
 // an engine that is absent or fails to start is reported as unavailable and everything else keeps working.
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import pg from 'pg';
@@ -10,6 +10,7 @@ import type { Scope } from '../contracts.ts';
 import { FsObjectStore, S3ObjectStore, pgSql } from '../service-kit.ts';
 import type { AuthorizationPort, BudgetPort, EvidencePort, ObjectStore, Route, ServiceContext, Sql, StandardEngine, TokenVerifier, UseDecisionPort } from '../service-kit.ts';
 import * as orchestrationModule from '../orchestration/index.ts';
+import * as adapters from './adapters.ts';
 import type { OrchestrationEngine } from '../orchestration/index.ts';
 
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -62,6 +63,15 @@ export function unifyDomainError(cls: unknown): void {
 }
 unifyDomainError(DomainError);
 
+const WORKER = `pam-${process.pid}`;
+/** Engines name and parameterise their job pass differently; this is the one place that knows how. */
+function jobRunner(short: string, engine: AnyEngine): (() => Promise<number>) | null {
+  const stringArg = ['consent', 'resources'].includes(short);
+  const fn = typeof engine.runJobsOnce === 'function' ? engine.runJobsOnce : typeof engine.runJobs === 'function' ? engine.runJobs : null;
+  if (fn === null) return null;
+  return async () => Number(await (stringArg ? fn.call(engine, WORKER) : fn.call(engine, { worker: WORKER })) ?? 0);
+}
+
 export const APP_SCHEMA = 'pam_app';
 export async function migrateApp(sql: Sql): Promise<void> {
   await sql.query(`create schema if not exists ${APP_SCHEMA}`);
@@ -79,6 +89,7 @@ export async function compose(env: Env, options: { actions?: (runtime: Runtime) 
   if (doMigrate) { await migrateApp(sql); await orchestrationModule.migrate(sql); }
 
   const maybe = (short: string): AnyEngine | null => entries.get(short)?.engine ?? null;
+  const serviceContextRef: { fn: (scope: Scope, purpose?: string) => Promise<ServiceContext> } = { fn: async () => { throw new DomainError('unavailable', 'Service identity is not ready'); } };
   // Ports are resolved lazily so engines can be constructed in any order and absent engines fail closed at call time.
   const port = <T extends object>(short: string, describe: string): T => new Proxy({}, {
     get: (_t, prop) => (...args: unknown[]) => {
@@ -88,7 +99,11 @@ export async function compose(env: Env, options: { actions?: (runtime: Runtime) 
     },
   }) as T;
   const authorization = port<AuthorizationPort>('identity', 'Authorization');
-  const useDecisions = port<UseDecisionPort>('consent', 'Use decisions');
+  // Use decisions are about the subject and the intended use, not about who asks: engines consult E11 under PAM's service
+  // identity (scoped to the caller's organization and project), so ordinary users need no consent-engine capability and
+  // cannot influence the outcome. The requesting actor stays on the calling engine's own audit record.
+  const consentPort = port<UseDecisionPort>('consent', 'Use decisions');
+  const useDecisions: UseDecisionPort = { decide: async (ctx, request) => consentPort.decide({ ...(await serviceContextRef.fn({ tenantId: ctx.tenantId, projectId: ctx.projectId })), requestId: ctx.requestId }, request) };
   const evidence = port<EvidencePort>('evidence', 'Evidence storage');
   const budget = port<BudgetPort>('resources', 'Budget');
 
@@ -100,6 +115,16 @@ export async function compose(env: Env, options: { actions?: (runtime: Runtime) 
       config: { ...(env.EVIDENCE_MASTER_KEY ? { encryption: { currentKeyVersion: env.EVIDENCE_MASTER_KEY_VERSION ?? 'v1', keys: { [env.EVIDENCE_MASTER_KEY_VERSION ?? 'v1']: key32(env.EVIDENCE_MASTER_KEY, 'EVIDENCE_MASTER_KEY') } } } : {}), ...(env.EVIDENCE_SCAN_POLICY === 'structural_only' ? { scanPolicy: 'structural_only' } : {}) } }),
   };
   factories.resources = (m) => m.createEngine({ sql, objects: objectsFor(env, 'resources'), ports: { authorization }, config: { ...(env.ALLOW_LIVE_PAYMENTS === '1' ? { allowLivePayments: true } : {}) } });
+  const need = (short: string): AnyEngine => { const e = maybe(short); if (e === null) throw new DomainError('unavailable', `${short} engine is unavailable`); return e; };
+  if (env.PAM_DATA_DIR) mkdirSync(join(resolve(env.PAM_DATA_DIR), 'tmp', 'processing'), { recursive: true });
+  factories.processing = (m) => m.createEngine({ sql, objects: objectsFor(env, 'processing'), ports: { evidence, useDecisions, authorization, budget },
+    config: { ...(env.PAM_DATA_DIR ? { tempRoot: join(resolve(env.PAM_DATA_DIR), 'tmp', 'processing') } : {}), ...(env.WHISPER_BINARY && env.WHISPER_MODEL ? { asr: { whisper: { kind: env.WHISPER_KIND ?? 'whisper.cpp', binary: env.WHISPER_BINARY, model: env.WHISPER_MODEL } } } : {}) } });
+  factories.knowledge = (m) => m.createEngine({ sql, ports: { evidence, useDecision: useDecisions, authorization } });
+  factories.investigation = (m) => m.createEngine({ sql, objects: objectsFor(env, 'investigation'), ports: {
+    evidence: adapters.investigationEvidencePort(need), processing: adapters.investigationProcessingPort(need), knowledge: adapters.investigationKnowledgePort(need),
+    ...(existsSync(join(enginesDir, 'discovery', 'src', 'engine', 'index.ts')) ? { discovery: port('discovery', 'Discovery') } : {}),
+    ...(existsSync(join(enginesDir, 'correspondence', 'src', 'engine', 'index.ts')) ? { correspondence: port('correspondence', 'Correspondence') } : {}),
+    budget, authorization } });
   const generic = (short: string) => (m: Record<string, any>): unknown => m.createEngine({ sql, objects: objectsFor(env, short), ports: { authorization, useDecisions, evidence, budget }, config: {} }); // eslint-disable-line @typescript-eslint/no-explicit-any
 
   for (const [id, short] of ENGINE_ORDER) {
@@ -111,7 +136,7 @@ export async function compose(env: Env, options: { actions?: (runtime: Runtime) 
       const mod = await import(pathToFileURL(entryPath).href) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
       if (doMigrate) await mod.migrate(sql);
       const engine = (factories[short] ?? generic(short))(mod) as AnyEngine;
-      entries.set(short, { id, short, available: true, error: null, engine, routes: mod.routes(engine) as Route[], runJobs: typeof engine.runJobsOnce === 'function' ? () => engine.runJobsOnce() as Promise<number> : typeof engine.runJobs === 'function' ? () => engine.runJobs() as Promise<number> : null });
+      entries.set(short, { id, short, available: true, error: null, engine, routes: mod.routes(engine) as Route[], runJobs: jobRunner(short, engine) });
     } catch (error) {
       entries.set(short, { id, short, available: false, error: error instanceof Error ? error.message : String(error), engine: null, routes: [], runJobs: null });
     }
@@ -135,6 +160,7 @@ export async function compose(env: Env, options: { actions?: (runtime: Runtime) 
     return ctx;
   };
 
+  serviceContextRef.fn = serviceContext;
   const runtimeRef: { current: Runtime | null } = { current: null };
   const orchestration = orchestrationModule.createEngine({
     sql,
