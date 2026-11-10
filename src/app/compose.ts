@@ -129,7 +129,7 @@ export async function compose(env: Env, options: { actions?: (runtime: Runtime) 
   const need = (short: string): AnyEngine => { const e = maybe(short); if (e === null) throw new DomainError('unavailable', `${short} engine is unavailable`); return e; };
   if (env.PAM_DATA_DIR) mkdirSync(join(resolve(env.PAM_DATA_DIR), 'tmp', 'processing'), { recursive: true });
   factories.processing = (m) => m.createEngine({ sql, objects: objectsFor(env, 'processing'), ports: { evidence, useDecisions, authorization, budget },
-    config: { ...(env.PAM_DATA_DIR ? { tempRoot: join(resolve(env.PAM_DATA_DIR), 'tmp', 'processing') } : {}), ...(env.WHISPER_BINARY && env.WHISPER_MODEL ? { asr: { whisper: { kind: env.WHISPER_KIND ?? 'whisper.cpp', binary: env.WHISPER_BINARY, model: env.WHISPER_MODEL } } } : {}) } });
+    config: { ...(env.PROCESSING_LEASE_MS ? { jobLeaseMs: Number(env.PROCESSING_LEASE_MS) } : {}), ...(env.PAM_DATA_DIR ? { tempRoot: join(resolve(env.PAM_DATA_DIR), 'tmp', 'processing') } : {}), ...(env.WHISPER_BINARY && env.WHISPER_MODEL ? { asr: { whisper: { kind: env.WHISPER_KIND ?? 'whisper.cpp', binary: env.WHISPER_BINARY, model: env.WHISPER_MODEL } } } : {}) } });
   factories.knowledge = (m) => m.createEngine({ sql, ports: { evidence, useDecision: useDecisions, authorization } });
   factories.investigation = (m) => m.createEngine({ sql, objects: objectsFor(env, 'investigation'), ports: {
     evidence: adapters.investigationEvidencePort(need), processing: adapters.investigationProcessingPort(need), knowledge: adapters.investigationKnowledgePort(need),
@@ -144,7 +144,7 @@ export async function compose(env: Env, options: { actions?: (runtime: Runtime) 
     budget, authorization } });
   factories.discovery = (m) => m.createEngine({ sql, objects: objectsFor(env, 'discovery'), ports: { evidence, authorization, useDecision: useDecisions },
     config: { userAgent: env.DISCOVERY_USER_AGENT ?? 'PAM-Research/0.1 (automated research assistant)', allowedPrivateHosts: (env.DISCOVERY_ALLOWED_PRIVATE_HOSTS ?? '').split(',').filter(Boolean),
-      ...(env.DISCOVERY_ALLOWED_PORTS ? { allowedPorts: env.DISCOVERY_ALLOWED_PORTS.split(',').map(Number) } : {}), ...(env.DISCOVERY_CREDENTIAL_KEY ? { credentialKey: env.DISCOVERY_CREDENTIAL_KEY } : {}), ...(env.DISCOVERY_MIN_INTERVAL_MS ? { defaultMinIntervalMs: Number(env.DISCOVERY_MIN_INTERVAL_MS) } : {}) } });
+      ...(env.DISCOVERY_ALLOWED_PORTS ? { allowedPorts: env.DISCOVERY_ALLOWED_PORTS.split(',').map(Number) } : {}), ...(env.DISCOVERY_CREDENTIAL_KEY ? { credentialKey: env.DISCOVERY_CREDENTIAL_KEY } : {}), ...(env.DISCOVERY_MIN_INTERVAL_MS ? { defaultMinIntervalMs: Number(env.DISCOVERY_MIN_INTERVAL_MS) } : {}), ...(env.DISCOVERY_LEASE_MS ? { leaseMs: Number(env.DISCOVERY_LEASE_MS) } : {}) } });
   factories.correspondence = (m) => m.createEngine({ sql, objects: objectsFor(env, 'correspondence'), ports: { authorization, budget, evidence, useDecision: useDecisions },
     config: { ...(env.CORRESPONDENCE_SECRET_KEY ? { secretKey: env.CORRESPONDENCE_SECRET_KEY } : {}), provider: { allowPrivateHosts: env.CORRESPONDENCE_ALLOW_PRIVATE_HOSTS === '1', allowInsecureTls: env.CORRESPONDENCE_ALLOW_INSECURE_TLS === '1' }, ...(env.CORRESPONDENCE_RECONCILE_DELAY_MS ? { reconcileDelayMs: Number(env.CORRESPONDENCE_RECONCILE_DELAY_MS) } : {}) } });
   factories.editorial = (m) => m.createEngine({ sql, objects: objectsFor(env, 'editorial'), ports: { knowledge: adapters.editorialKnowledgePort(need), useDecisions, authorization } });

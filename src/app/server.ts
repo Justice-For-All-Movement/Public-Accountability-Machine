@@ -68,9 +68,16 @@ export function appRoutes(runtime: Runtime, state: AppState, extra: (runtime: Ru
   ];
 }
 
+const inflight = new WeakMap<Runtime, Set<Promise<unknown>>>();
+/** Waits for task executions started by earlier worker passes (used on shutdown). */
+export async function drainWorker(runtime: Runtime): Promise<void> { await Promise.all([...(inflight.get(runtime) ?? [])]); }
 export async function workerPass(runtime: Runtime, state: AppState, worker: string): Promise<void> {
   try {
-    await runtime.orchestration.workOnce({ worker });
+    // Task execution is not awaited: an action may follow long engine work whose jobs this same pass must keep running.
+    // Concurrency stays bounded by the orchestration engine's lease accounting.
+    const pending = inflight.get(runtime) ?? new Set<Promise<unknown>>(); inflight.set(runtime, pending);
+    const p: Promise<unknown> = runtime.orchestration.workOnce({ worker }).catch((error: unknown) => { state.lastWorkerError = error instanceof Error ? error.message : String(error); }).finally(() => pending.delete(p));
+    pending.add(p);
     for (const entry of runtime.engines.values()) if (entry.runJobs !== null) await entry.runJobs();
     const intake = await syncIntakeOnce(runtime);
     state.lastIntake = intake;
@@ -133,6 +140,6 @@ export async function startServer(runtime: Runtime, options: StartOptions = {}):
     timer = setInterval(tick, options.workerIntervalMs ?? 1000);
   }
   return { server, url: `http://${options.host ?? '127.0.0.1'}:${address.port}`, state,
-    async stop() { stopped = true; if (timer !== null) clearInterval(timer); for (let i = 0; i < 200 && running; i++) await new Promise((r) => setTimeout(r, 25)); await new Promise<void>((ok) => server.close(() => ok())); } };
+    async stop() { stopped = true; if (timer !== null) clearInterval(timer); for (let i = 0; i < 200 && running; i++) await new Promise((r) => setTimeout(r, 25)); await Promise.race([drainWorker(runtime), new Promise((r) => setTimeout(r, 5000))]); await new Promise<void>((ok) => server.close(() => ok())); } };
 }
 export { DomainError };
