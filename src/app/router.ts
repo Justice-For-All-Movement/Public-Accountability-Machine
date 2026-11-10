@@ -1,7 +1,7 @@
 // Event router: reads every engine's outbox feed and delivers upstream changes to the engines that hold dependents.
 // Delivery is at-least-once; every engine's applyUpstreamChange is idempotent by eventId. A cursor only advances after
 // all deliveries for an event were attempted; a failed delivery is retried on the next pass and never dropped silently.
-import type { EngineEvent, UpstreamChange } from '../service-kit.ts';
+import type { EngineEvent, ServiceContext, UpstreamChange } from '../service-kit.ts';
 import { parseUref } from '../service-kit.ts';
 import type { Runtime } from './compose.ts';
 
@@ -28,6 +28,23 @@ export const RULES: readonly Rule[] = [
   { match: /^production\.render_(stale|blocked|completed)$/, kind: 'render_changed', to: ['release'], refs: (e) => [e.subject, e.subject.split('@')[0] as string, ...strings(payload(e).project), ...strings(payload(e).supersedes)] },
   { match: /^consent\.permission_withdrawn$/, kind: 'permission_withdrawn', to: ALL_USERS, refs: (e) => [e.subject, ...strings(payload(e).subjects), ...strings(payload(e).affectedOutputs)] },
   { match: /^consent\.permission_(changed|expired)$/, kind: 'permission_changed', to: ALL_USERS, refs: (e) => [e.subject, ...strings(payload(e).subjects)] },
+];
+
+/**
+ * Reactions: events that create follow-up work in another engine (as opposed to marking dependents stale).
+ * A reply's assertions go to the knowledge engine as PROPOSALS from origin `reply`, typed as unverified allegations whose
+ * origin names the preserved message (the knowledge engine reserves `attributed_statement` for claims tied to a statement
+ * record that a human reviewer creates). They await human review and are never verified facts. Idempotent by the event id.
+ */
+type Reaction = Readonly<{ match: RegExp; run: (runtime: Runtime, ctx: ServiceContext, e: EngineEvent, eventKey: string) => Promise<void> }>;
+export const REACTIONS: readonly Reaction[] = [
+  { match: /^correspondence\.reply_received$/, run: async (runtime, ctx, e, eventKey) => {
+    const knowledge = runtime.maybe('knowledge'); if (knowledge === null) return;
+    const p = payload(e); const candidates = (Array.isArray(p.candidates) ? p.candidates : []) as { text?: unknown }[];
+    const items = candidates.filter((c) => typeof c.text === 'string' && c.text.trim().length >= 12).slice(0, 20).map((c) => ({ text: (c.text as string).trim().slice(0, 2000), claimType: 'allegation', ...(typeof p.questionRef === 'string' ? { question: p.questionRef } : {}) }));
+    if (items.length === 0) return;
+    await knowledge.proposeClaims(ctx, { origin: { kind: 'reply', ref: e.subject, label: 'Reply received by correspondence; attributed, not verified' }, items, idempotencyKey: `reply-${eventKey}` });
+  } },
 ];
 
 export type RouterReport = { events: number; deliveries: number; failures: { engine: string; eventId: string; error: string }[] };
@@ -60,6 +77,11 @@ export async function routeEventsOnce(runtime: Runtime, options: { batch?: numbe
             try { await engine.applyUpstreamChange(ctx, change); report.deliveries++; }
             catch (error) { ok = false; report.failures.push({ engine: target, eventId: change.eventId, error: error instanceof Error ? error.message : String(error) }); }
           }
+        }
+        for (const reaction of REACTIONS) {
+          if (!reaction.match.test(event.type)) continue;
+          try { await reaction.run(runtime, await runtime.serviceContext({ tenantId: event.tenantId, projectId: event.projectId }), event, `${entry.id}:${event.id}`); report.deliveries++; }
+          catch (error) { ok = false; report.failures.push({ engine: 'reaction', eventId: `${entry.id}:${event.id}`, error: error instanceof Error ? error.message : String(error) }); }
         }
         if (!ok) break; // retry this event (and everything after it) on the next pass
         await runtime.orchestration.advanceRouterCursor(cursorKey, event.id);

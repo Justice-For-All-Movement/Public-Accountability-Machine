@@ -11,7 +11,7 @@ import type { Json } from '../contracts.ts';
 import { createHttpHandler, requireCapability } from '../service-kit.ts';
 import type { Route } from '../service-kit.ts';
 import { routes as orchestrationRoutes } from '../orchestration/index.ts';
-import { provisionOrganization } from './compose.ts';
+import { alignRoleCatalog, provisionOrganization } from './compose.ts';
 import type { Runtime } from './compose.ts';
 import { routeEventsOnce } from './router.ts';
 import type { RouterReport } from './router.ts';
@@ -38,6 +38,8 @@ export function appRoutes(runtime: Runtime, state: AppState, extra: (runtime: Ru
     } },
     // Creates PAM's own service identity in the caller's organization so workers and the event router can act there.
     { method: 'POST', path: '/v1/provision', handler: async (r) => { requireCapability(r.ctx, 'identity:admin'); return (await provisionOrganization(runtime, r.ctx)) as unknown as Json; } },
+    // Run after /v1/provision with a fresh token, repeatedly until `again` is false.
+    { method: 'POST', path: '/v1/provision/roles', handler: async (r) => { requireCapability(r.ctx, 'identity:admin'); return { again: await alignRoleCatalog(runtime, r.ctx) }; } },
     ...extra(runtime),
   ];
 }

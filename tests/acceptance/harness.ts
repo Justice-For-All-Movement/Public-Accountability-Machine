@@ -9,7 +9,7 @@ import { randomBytes } from 'node:crypto';
 import pg from 'pg';
 import { withDisposableDatabase } from '../../src/service-kit.ts';
 import type { ServiceContext } from '../../src/service-kit.ts';
-import { compose, provisionOrganization } from '../../src/app/compose.ts';
+import { alignRoleCatalog, compose, provisionOrganization } from '../../src/app/compose.ts';
 import type { Runtime } from '../../src/app/compose.ts';
 import { workerPass } from '../../src/app/server.ts';
 import type { AppState } from '../../src/app/server.ts';
@@ -24,7 +24,9 @@ export function skipReason(required: readonly string[] = REQUIRED): string | fal
 }
 
 export type Person = { login: string; password: string; actorId: string; refreshToken: string };
-export type Org = { tenantId: string; projectId: string; owner: Person; as(person: Person, purpose: string): Promise<ServiceContext> };
+export type Org = { tenantId: string; projectId: string; owner: Person; as(person: Person, purpose: string): Promise<ServiceContext>;
+  /** Context for a durable agent identity: a short-lived token carrying exactly the listed capabilities, or a refusal. */
+  asAgent(agentId: string, purpose: string, capabilities: string[]): Promise<ServiceContext> };
 export type Stack = { runtime: Runtime; state: AppState; dataDir: string; url: string;
   createOrg(name: string): Promise<Org>;
   addUser(org: Org, name: string, roles: string[]): Promise<Person>;
@@ -68,7 +70,12 @@ export async function withStack(fn: (stack: Stack) => Promise<void>, extraEnv: R
         const owner = await signIn(login, pw, actorId);
         if (platformAdmin === null) platformAdmin = { person: owner, tenantId, projectId };
         await provisionOrganization(runtime, await ctxFor(tenantId, projectId, owner, 'administration'));
-        return { tenantId, projectId, owner, as: (person, purpose) => ctxFor(tenantId, projectId, person, purpose) };
+        while (await alignRoleCatalog(runtime, await ctxFor(tenantId, projectId, owner, 'administration'))) { /* one catalog change per fresh token */ }
+        return { tenantId, projectId, owner, as: (person, purpose) => ctxFor(tenantId, projectId, person, purpose),
+          asAgent: async (agentId, purpose, capabilities) => {
+            const issued = await identity.issueAgentToken(await ctxFor(tenantId, projectId, owner, 'administration'), { agentId, purpose, capabilities, ttlSeconds: 600 }) as { token: string };
+            return runtime.verify(issued.token, { requestId: `a-${randomBytes(4).toString('hex')}` });
+          } };
       },
       async addUser(org, name, roles) {
         const login = `${name.toLowerCase().replaceAll(/[^a-z]/g, '')}-${randomBytes(3).toString('hex')}@example.org`; const pw = password();

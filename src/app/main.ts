@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Command line entry: `node src/app/main.ts <migrate|serve|worker|bootstrap-admin>`.
-import { compose, provisionOrganization } from './compose.ts';
+import { alignRoleCatalog, compose, provisionOrganization } from './compose.ts';
 import { startServer, workerPass } from './server.ts';
 import type { AppState } from './server.ts';
 import { loadActions, loadExtraRoutes } from './registry.ts';
@@ -21,6 +21,8 @@ else if (command === 'bootstrap-admin') {
   const token = await identity.issueAccessToken({ refreshToken: session.refreshToken, tenantId: made.organization.id, projectId: made.project.id, purpose: 'administration' });
   const ctx = await runtime.verify(token.token, { requestId: 'bootstrap' });
   await provisionOrganization(runtime, ctx);
+  const fresh = async () => runtime.verify((await identity.issueAccessToken({ refreshToken: session.refreshToken, tenantId: made.organization.id, projectId: made.project.id, purpose: 'administration' })).token, { requestId: 'bootstrap' });
+  while (await alignRoleCatalog(runtime, await fresh())) { /* one catalog change per fresh token */ }
   await identity.logout(session.refreshToken);
   console.log(JSON.stringify({ organization: made.organization.id, project: made.project.id, administrator: made.actorId }));
   await runtime.close();

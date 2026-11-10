@@ -105,7 +105,17 @@ export async function compose(env: Env, options: { actions?: (runtime: Runtime) 
   const consentPort = port<UseDecisionPort>('consent', 'Use decisions');
   const useDecisions: UseDecisionPort = { decide: async (ctx, request) => consentPort.decide({ ...(await serviceContextRef.fn({ tenantId: ctx.tenantId, projectId: ctx.projectId })), requestId: ctx.requestId }, request) };
   const evidence = port<EvidencePort>('evidence', 'Evidence storage');
-  const budget = port<BudgetPort>('resources', 'Budget');
+  // Budget calls run with PAM's service capabilities (ordinary callers and agents hold no `resources:spend`) but keep the
+  // ORIGINAL actor, because E13 decides by the actor's explicit budget assignment: an agent with no assigned budget is
+  // refused. Engines' unit names are normalised to the resource engine's vocabulary here.
+  const budgetEngine = port<BudgetPort>('resources', 'Budget');
+  const UNIT: Record<string, string> = { message: 'messages', token: 'tokens_out', compute_second: 'compute_seconds', render_second: 'render_seconds' };
+  const asSpender = async (ctx: ServiceContext): Promise<ServiceContext> => ({ ...(await serviceContextRef.fn({ tenantId: ctx.tenantId, projectId: ctx.projectId })), actor: ctx.actor, requestId: ctx.requestId, capabilities: ['resources:spend', 'resources:read', 'resources:write'] });
+  const budget: BudgetPort = {
+    reserve: async (ctx, request) => budgetEngine.reserve(await asSpender(ctx), { ...request, unit: UNIT[request.unit] ?? request.unit }),
+    commit: async (ctx, id, actual) => budgetEngine.commit(await asSpender(ctx), id, actual),
+    release: async (ctx, id, reason) => budgetEngine.release(await asSpender(ctx), id, reason),
+  };
 
   // Per-engine construction. Keys in `ports` use the names each engine documents in its docs/ENGINE_API.md.
   const factories: Record<string, (mod: Record<string, any>) => unknown> = { // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -225,5 +235,34 @@ export async function provisionOrganization(runtime: Runtime, ctx: ServiceContex
   const identity = runtime.get('identity');
   const made = await identity.createServiceIdentity(ctx, { name: 'pam-orchestrator', description: 'PAM orchestration workers and event router', projectId: '*', roles: ['service_orchestrator'] }) as { service: { id: string } };
   await runtime.sql.query(`insert into ${APP_SCHEMA}.tenants (tenant_id, orchestrator_service_id, home_project_id) values ($1,$2,$3) on conflict (tenant_id) do nothing`, [ctx.tenantId, made.service.id, ctx.projectId]);
+  // The seeded `administration` purpose covers identity, orchestration, workspace and resources only. A PAM deployment
+  // also administers the other engines (mailboxes, sources, policies, destinations, sending grants), so that purpose is
+  // extended here (last: changing a purpose invalidates the caller's current token), as organization data, with each engine's exact admin and grant capabilities plus read access.
+  const purposes = await identity.listPurposes(ctx) as { name: string; description: string; capabilities: string[] }[];
+  const administration = purposes.find((p) => p.name === 'administration');
+  if (administration !== undefined) {
+    const extra = ['orchestration', ...ENGINE_ORDER.map(([, short]) => short), 'intake'].flatMap((e) => [`${e}:admin`, `${e}:grant`, `${e}:read`]);
+    const capabilities = [...new Set([...administration.capabilities, ...extra])];
+    if (capabilities.length !== administration.capabilities.length) await identity.definePurpose(ctx, { name: 'administration', description: administration.description, capabilities });
+  }
   return { tenantId: ctx.tenantId, serviceId: made.service.id, created: true };
+}
+
+/**
+ * Aligns the organization's seeded role catalog with the capability names the engines actually use. Call with a FRESH
+ * administrator context after provisionOrganization (each catalog change invalidates the caller's current token).
+ * Returns true when another call with a fresh context is needed.
+ */
+export async function alignRoleCatalog(runtime: Runtime, ctx: ServiceContext): Promise<boolean> {
+  const identity = runtime.get('identity');
+  const roles = await identity.listRoles(ctx) as { name: string; description: string; capabilities: string[]; actorKinds: string[] }[];
+  // The correspondence engine names drafting `correspondence:write`; the seeded drafting agent only holds `correspondence:draft`.
+  const wanted: Record<string, string[]> = { agent_drafter: ['correspondence:write'] };
+  for (const [name, add] of Object.entries(wanted)) {
+    const role = roles.find((r) => r.name === name);
+    if (role === undefined || add.every((c) => role.capabilities.includes(c))) continue;
+    await identity.defineRole(ctx, { name, description: role.description, capabilities: [...role.capabilities, ...add], actorKinds: role.actorKinds });
+    return true;
+  }
+  return false;
 }
