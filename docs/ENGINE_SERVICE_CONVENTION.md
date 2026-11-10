@@ -85,3 +85,13 @@ Each engine stores `sources: string[]` (urefs) on dependent objects so `applyUps
 
 Report separately: implemented · locally tested · integration tested · verified against a real configured provider ·
 deployed and checked in a hosted environment. A controlled transport is test infrastructure, not live-provider proof.
+
+## 5. Notes from integration
+
+- **DomainError across engines.** Each engine vendors its own `contracts.ts`, so `instanceof DomainError` is false for an
+  error thrown by another engine's copy. A host that composes engines in one process must make the check structural
+  (`name === 'DomainError'` and a string `code`); PAM does this in `src/app/compose.ts` (`unifyDomainError`) for every copy it
+  loads. A standalone engine that calls another engine over HTTP is unaffected (`engineClient` rebuilds the error locally).
+- **Event feeds lag by design** while any older transaction is open on the same PostgreSQL server (gap safety). Consumers poll.
+- **5xx DomainErrors are opaque** in the kit HTTP layer. Routes that must expose `unavailable` return 503 themselves.
+- **Sensitive capabilities** (`…:spend`, `…:export`, `…:approve`, …) must be named exactly in a role or grant; plan roles accordingly.

@@ -1,0 +1,175 @@
+// Composes the engines into one runtime. Each engine keeps its own schema and is reached only through its service
+// interface (`createEngine` / `routes`). Engines are loaded from ./engines/<short> (see scripts/bootstrap-engines.mjs);
+// an engine that is absent or fails to start is reported as unavailable and everything else keeps working.
+import { existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import pg from 'pg';
+import { DomainError } from '../contracts.ts';
+import type { Scope } from '../contracts.ts';
+import { FsObjectStore, S3ObjectStore, pgSql } from '../service-kit.ts';
+import type { AuthorizationPort, BudgetPort, EvidencePort, ObjectStore, Route, ServiceContext, Sql, StandardEngine, TokenVerifier, UseDecisionPort } from '../service-kit.ts';
+import * as orchestrationModule from '../orchestration/index.ts';
+import type { OrchestrationEngine } from '../orchestration/index.ts';
+
+export type Env = Readonly<Record<string, string | undefined>>;
+// Engines are loaded dynamically; their precise types live in their own repositories.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AnyEngine = StandardEngine & Record<string, any>;
+export type EngineEntry = Readonly<{
+  id: string; short: string; available: boolean; error: string | null;
+  engine: AnyEngine | null; routes: readonly Route[]; runJobs: (() => Promise<number>) | null;
+}>;
+export const ENGINE_ORDER: readonly (readonly [string, string])[] = [
+  ['E01', 'identity'], ['E11', 'consent'], ['E13', 'resources'], ['E05', 'evidence'], ['E06', 'processing'], ['E04', 'discovery'], ['E07', 'knowledge'],
+  ['E03', 'correspondence'], ['E08', 'investigation'], ['E09', 'editorial'], ['E10', 'production'], ['E12', 'release'], ['E14', 'workspace'],
+];
+
+export type Runtime = Readonly<{
+  env: Env; sql: Sql; engines: ReadonlyMap<string, EngineEntry>; orchestration: OrchestrationEngine;
+  verify: TokenVerifier;
+  /** Authorized context for PAM's own service identity in one organization and project. Fails closed if not provisioned. */
+  serviceContext(scope: Scope, purpose?: string): Promise<ServiceContext>;
+  get(short: string): AnyEngine;
+  maybe(short: string): AnyEngine | null;
+  close(): Promise<void>;
+}>;
+
+function objectsFor(env: Env, short: string): ObjectStore {
+  if ((env.OBJECT_STORE ?? 'fs') === 's3') {
+    for (const k of ['S3_ENDPOINT', 'S3_BUCKET', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY']) if (!env[k]) throw new DomainError('invalid_config', `${k} is required for OBJECT_STORE=s3`);
+    return new S3ObjectStore({ endpoint: env.S3_ENDPOINT as string, region: env.S3_REGION ?? 'us-east-1', bucket: env.S3_BUCKET as string, accessKeyId: env.S3_ACCESS_KEY_ID as string, secretAccessKey: env.S3_SECRET_ACCESS_KEY as string, prefix: `${env.S3_PREFIX ?? ''}${short}/` });
+  }
+  return new FsObjectStore(join(resolve(env.PAM_DATA_DIR ?? './data'), 'objects', short));
+}
+const key32 = (value: string | undefined, name: string): Uint8Array => {
+  const bytes = Buffer.from(value ?? '', 'base64');
+  if (bytes.byteLength !== 32) throw new DomainError('invalid_config', `${name} must be 32 bytes, base64-encoded`);
+  return new Uint8Array(bytes);
+};
+
+/**
+ * Every engine vendors its own copy of contracts.ts, so each has a distinct DomainError class and a plain `instanceof`
+ * fails across engines (an engine's `forbidden` would surface as an internal error in another engine or the gateway).
+ * The host makes the check structural for each copy it loads: any Error named DomainError with a string code matches.
+ */
+export function unifyDomainError(cls: unknown): void {
+  if (typeof cls !== 'function' || Object.hasOwn(cls, Symbol.hasInstance)) return;
+  Object.defineProperty(cls, Symbol.hasInstance, { value(this: unknown, v: unknown): boolean {
+    if (this !== cls) return Function.prototype[Symbol.hasInstance].call(this, v);
+    return v instanceof Error && v.name === 'DomainError' && typeof (v as { code?: unknown }).code === 'string';
+  } });
+}
+unifyDomainError(DomainError);
+
+export const APP_SCHEMA = 'pam_app';
+export async function migrateApp(sql: Sql): Promise<void> {
+  await sql.query(`create schema if not exists ${APP_SCHEMA}`);
+  await sql.query(`create table if not exists ${APP_SCHEMA}.tenants (tenant_id text primary key, orchestrator_service_id text not null, home_project_id text not null, provisioned_at timestamptz not null default now())`);
+  await sql.query(`create table if not exists ${APP_SCHEMA}.settings (tenant_id text not null, project_id text not null, key text not null, value jsonb not null, updated_by text not null, updated_at timestamptz not null default now(), primary key (tenant_id, project_id, key))`);
+}
+
+export async function compose(env: Env, options: { actions?: (runtime: Runtime) => Record<string, orchestrationModule.ActionDefinition>; migrate?: boolean } = {}): Promise<Runtime> {
+  if (!env.DATABASE_URL) throw new DomainError('invalid_config', 'DATABASE_URL is required');
+  const pool = new pg.Pool({ connectionString: env.DATABASE_URL, max: Number(env.DATABASE_POOL_MAX ?? 20) });
+  const sql = pgSql(pool);
+  const enginesDir = resolve(env.PAM_ENGINES_DIR ?? './engines');
+  const entries = new Map<string, EngineEntry>();
+  const doMigrate = options.migrate !== false;
+  if (doMigrate) { await migrateApp(sql); await orchestrationModule.migrate(sql); }
+
+  const maybe = (short: string): AnyEngine | null => entries.get(short)?.engine ?? null;
+  // Ports are resolved lazily so engines can be constructed in any order and absent engines fail closed at call time.
+  const port = <T extends object>(short: string, describe: string): T => new Proxy({}, {
+    get: (_t, prop) => (...args: unknown[]) => {
+      const engine = maybe(short);
+      if (engine === null || typeof engine[prop as string] !== 'function') return Promise.reject(new DomainError('unavailable', `${describe} is unavailable (${short} engine not running)`));
+      return engine[prop as string](...args);
+    },
+  }) as T;
+  const authorization = port<AuthorizationPort>('identity', 'Authorization');
+  const useDecisions = port<UseDecisionPort>('consent', 'Use decisions');
+  const evidence = port<EvidencePort>('evidence', 'Evidence storage');
+  const budget = port<BudgetPort>('resources', 'Budget');
+
+  // Per-engine construction. Keys in `ports` use the names each engine documents in its docs/ENGINE_API.md.
+  const factories: Record<string, (mod: Record<string, any>) => unknown> = { // eslint-disable-line @typescript-eslint/no-explicit-any
+    identity: (m) => m.createEngine({ sql, config: { issuer: env.IDENTITY_ISSUER ?? 'pam-identity', ...(env.IDENTITY_KEY_ENCRYPTION_KEY ? { keyEncryptionKey: env.IDENTITY_KEY_ENCRYPTION_KEY } : {}), ...(env.IDENTITY_BOOTSTRAP_TOKEN ? { bootstrapToken: env.IDENTITY_BOOTSTRAP_TOKEN } : {}) } }),
+    consent: (m) => m.createEngine({ sql, ports: { authorization } }),
+    evidence: (m) => m.createEngine({ sql, objects: objectsFor(env, 'evidence'), ports: { useDecisions, authorization, ...(env.CLAMAV_DATABASE_DIR ? { scanner: new m.ClamScanner({ databaseDir: env.CLAMAV_DATABASE_DIR, ...(env.CLAMSCAN_BINARY ? { binary: env.CLAMSCAN_BINARY } : {}) }) } : {}) },
+      config: { ...(env.EVIDENCE_MASTER_KEY ? { encryption: { currentKeyVersion: env.EVIDENCE_MASTER_KEY_VERSION ?? 'v1', keys: { [env.EVIDENCE_MASTER_KEY_VERSION ?? 'v1']: key32(env.EVIDENCE_MASTER_KEY, 'EVIDENCE_MASTER_KEY') } } } : {}), ...(env.EVIDENCE_SCAN_POLICY === 'structural_only' ? { scanPolicy: 'structural_only' } : {}) } }),
+  };
+  factories.resources = (m) => m.createEngine({ sql, objects: objectsFor(env, 'resources'), ports: { authorization }, config: { ...(env.ALLOW_LIVE_PAYMENTS === '1' ? { allowLivePayments: true } : {}) } });
+  const generic = (short: string) => (m: Record<string, any>): unknown => m.createEngine({ sql, objects: objectsFor(env, short), ports: { authorization, useDecisions, evidence, budget }, config: {} }); // eslint-disable-line @typescript-eslint/no-explicit-any
+
+  for (const [id, short] of ENGINE_ORDER) {
+    const entryPath = join(enginesDir, short, 'src', 'engine', 'index.ts');
+    if (!existsSync(entryPath)) { entries.set(short, { id, short, available: false, error: 'engine service layer is not installed', engine: null, routes: [], runJobs: null }); continue; }
+    try {
+      const contractsPath = join(enginesDir, short, 'src', 'contracts.ts');
+      if (existsSync(contractsPath)) unifyDomainError((await import(pathToFileURL(contractsPath).href) as { DomainError?: unknown }).DomainError);
+      const mod = await import(pathToFileURL(entryPath).href) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (doMigrate) await mod.migrate(sql);
+      const engine = (factories[short] ?? generic(short))(mod) as AnyEngine;
+      entries.set(short, { id, short, available: true, error: null, engine, routes: mod.routes(engine) as Route[], runJobs: typeof engine.runJobsOnce === 'function' ? () => engine.runJobsOnce() as Promise<number> : typeof engine.runJobs === 'function' ? () => engine.runJobs() as Promise<number> : null });
+    } catch (error) {
+      entries.set(short, { id, short, available: false, error: error instanceof Error ? error.message : String(error), engine: null, routes: [], runJobs: null });
+    }
+  }
+
+  const identity = maybe('identity');
+  const verify: TokenVerifier = identity === null
+    ? async () => { throw new DomainError('unauthenticated', 'Identity engine is unavailable'); }
+    : identity.verifier() as TokenVerifier;
+  const cache = new Map<string, { ctx: ServiceContext; until: number }>();
+  const serviceContext = async (scope: Scope, purpose = 'operations'): Promise<ServiceContext> => {
+    const key = `${scope.tenantId}\u0000${scope.projectId}\u0000${purpose}`;
+    const hit = cache.get(key);
+    if (hit !== undefined && hit.until > Date.now()) return { ...hit.ctx, requestId: `svc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, now: new Date().toISOString() };
+    if (identity === null) throw new DomainError('unavailable', 'Identity engine is unavailable');
+    const row = (await sql.query<{ orchestrator_service_id: string }>(`select orchestrator_service_id from ${APP_SCHEMA}.tenants where tenant_id=$1`, [scope.tenantId]))[0];
+    if (row === undefined) throw new DomainError('forbidden', 'Organization is not provisioned for orchestration');
+    const issued = await identity.host.issueServiceToken({ tenantId: scope.tenantId, serviceId: row.orchestrator_service_id, projectId: scope.projectId, purpose, ttlSeconds: 300 }) as { token: string };
+    const ctx = await verify(issued.token, { requestId: 'svc' });
+    cache.set(key, { ctx, until: Date.now() + 120_000 });
+    return ctx;
+  };
+
+  const runtimeRef: { current: Runtime | null } = { current: null };
+  const orchestration = orchestrationModule.createEngine({
+    sql,
+    ports: {
+      authorization, budget,
+      agentContext: {
+        // Agents act under PAM's service identity narrowed to the organization and project of the task. Authority never
+        // comes from task input. (Per-agent least-privilege tokens are issued by actions that need them.)
+        contextFor: ({ scope, requestId }) => serviceContext(scope).then((ctx) => ({ ...ctx, requestId })),
+      },
+      // Actual effort per research lane is recorded in E13 (measured work, never outcome quotas).
+      work: { recordWork: async (ctx, work) => {
+        const r = maybe('resources'); if (r === null || work.lane === null) return;
+        await r.recordWork(ctx, { lane: work.lane, task: work.taskRef, objective: work.objectiveRef, startedAt: work.startedAt, endedAt: work.endedAt, activeSeconds: Math.max(1, Math.round(work.activeMs / 1000)), actorId: ctx.actor.id, actorKind: ctx.actor.kind, idempotencyKey: `work-${work.taskRef}-${work.endedAt}` });
+      } },
+    },
+    config: { maxConcurrency: Number(env.PAM_MAX_CONCURRENCY ?? 4), leaseMs: Number(env.PAM_TASK_LEASE_MS ?? 120_000) },
+  });
+
+  const runtime: Runtime = {
+    env, sql, engines: entries, orchestration, verify, serviceContext, maybe,
+    get(short) { const e = maybe(short); if (e === null) throw new DomainError('unavailable', `${short} engine is unavailable: ${entries.get(short)?.error ?? 'not installed'}`); return e; },
+    async close() { await pool.end(); },
+  };
+  runtimeRef.current = runtime;
+  for (const [name, def] of Object.entries(options.actions?.(runtime) ?? {})) orchestration.registerAction(name, def);
+  return runtime;
+}
+
+/** Creates PAM's orchestrator service identity in an organization. Requires a human administrator context for that organization. */
+export async function provisionOrganization(runtime: Runtime, ctx: ServiceContext): Promise<{ tenantId: string; serviceId: string; created: boolean }> {
+  const existing = (await runtime.sql.query<{ orchestrator_service_id: string }>(`select orchestrator_service_id from ${APP_SCHEMA}.tenants where tenant_id=$1`, [ctx.tenantId]))[0];
+  if (existing !== undefined) return { tenantId: ctx.tenantId, serviceId: existing.orchestrator_service_id, created: false };
+  const identity = runtime.get('identity');
+  const made = await identity.createServiceIdentity(ctx, { name: 'pam-orchestrator', description: 'PAM orchestration workers and event router', projectId: '*', roles: ['service_orchestrator'] }) as { service: { id: string } };
+  await runtime.sql.query(`insert into ${APP_SCHEMA}.tenants (tenant_id, orchestrator_service_id, home_project_id) values ($1,$2,$3) on conflict (tenant_id) do nothing`, [ctx.tenantId, made.service.id, ctx.projectId]);
+  return { tenantId: ctx.tenantId, serviceId: made.service.id, created: true };
+}

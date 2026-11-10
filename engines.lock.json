@@ -1,0 +1,20 @@
+{
+  "comment": "Exact engine source revisions PAM is composed from. scripts/bootstrap-engines.mjs materialises them under engines/.",
+  "owner": "Justice-For-All-Movement",
+  "engines": {
+    "identity": { "id": "E01", "repository": "Identity-Authorization-and-Policy-Engine", "revision": null },
+    "intake": { "id": "E02", "repository": "Secure-Intake-Case-Workflow-Engine", "revision": null, "external": true },
+    "correspondence": { "id": "E03", "repository": "Correspondence-and-Outreach-Engine", "revision": null },
+    "discovery": { "id": "E04", "repository": "Discovery-and-Acquisition-Engine", "revision": null },
+    "evidence": { "id": "E05", "repository": "Evidence-Storage-and-Provenance-Engine", "revision": null },
+    "processing": { "id": "E06", "repository": "Document-and-Media-Processing-Engine", "revision": null },
+    "knowledge": { "id": "E07", "repository": "Knowledge-and-verification-engine", "revision": null },
+    "investigation": { "id": "E08", "repository": "Factual-investigation-engine", "revision": null },
+    "editorial": { "id": "E09", "repository": "Editorial-and-Story-Development", "revision": null },
+    "production": { "id": "E10", "repository": "Media-Production", "revision": null },
+    "consent": { "id": "E11", "repository": "Consent-rights-and-use-decisions-engine", "revision": null },
+    "release": { "id": "E12", "repository": "Packaging-release-and-correction-engine", "revision": null },
+    "resources": { "id": "E13", "repository": "Resources-and-commercial-operations-engine", "revision": null },
+    "workspace": { "id": "E14", "repository": "Visual-workspace-and-audit-engine", "revision": null }
+  }
+}
