@@ -21,9 +21,9 @@ img, video, iframe { max-width: 100%; }
 .pam-brand img { max-height: 2rem; width: auto; }
 .pam-brand__name { margin: 0; font-weight: 700; font-size: 1.1rem; }
 .pam-brand__name a { color: var(--ws-text); text-decoration: none; }
-.pam-header__tools { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem; }
+.pam-header__tools { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem; min-width: 0; max-width: 100%; }
 .pam-header__tools[hidden] { display: none; }
-.pam-switcher { display: flex; flex-direction: column; font-size: 0.8rem; min-width: 0; }
+.pam-switcher { display: flex; flex-direction: column; font-size: 0.8rem; min-width: 0; max-width: 100%; }
 .pam-switcher select { max-width: 100%; }
 .pam-search { display: flex; gap: 0.25rem; min-width: 0; }
 .pam-search input { min-width: 0; width: 14rem; max-width: 100%; }
@@ -48,7 +48,8 @@ img, video, iframe { max-width: 100%; }
 .pam-inspector__ref code { overflow-wrap: anywhere; }
 
 @media (max-width: 60rem) {
-  .pam-layout { flex-direction: column; }
+  .pam-layout { flex-direction: column; align-items: stretch; }
+  .pam-main { width: 100%; }
   .pam-nav { flex: none; width: 100%; min-height: 0; border-right: 0; border-bottom: 1px solid var(--ws-border); padding: 0.5rem 1rem; }
   .pam-nav__toggle { display: inline-block; }
   .pam-nav ul { display: none; }
@@ -56,6 +57,8 @@ img, video, iframe { max-width: 100%; }
   .pam-inspector { position: fixed; inset: 0; flex: none; width: 100%; max-height: none; z-index: 50; border-left: 0; }
   .pam-search input { width: 100%; }
   .pam-search { flex: 1 1 12rem; }
+  .pam-header__tools, .pam-switcher { width: 100%; }
+  .pam-switcher select { width: 100%; }
 }
 
 .pam-region { margin-bottom: 1.5rem; }
@@ -108,3 +111,8 @@ input, select, textarea, button { font: inherit; }
 .pam-message pre { max-height: 20rem; }
 .pam-block { border-left: 4px solid var(--ws-border-strong); padding: 0.25rem 0.75rem; margin: 0.5rem 0; }
 .pam-signin { max-width: 32rem; }
+/* Keep component internals within narrow viewports. */
+.ws-timeline, .ws-board, .ws-graph, .ws-inspector, .ws-controls, .ws-search { max-width: 100%; min-width: 0; }
+.ws-timeline__filters > * { min-width: 0; max-width: 100%; }
+.ws-timeline__filters select, .ws-timeline__filters input { width: 100%; }
+.ws-timeline__scroll { max-width: 100%; }

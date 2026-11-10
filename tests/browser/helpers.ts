@@ -64,3 +64,9 @@ export async function axe(page: Page): Promise<{ id: string; impact: string; hel
   });
   return (result as { id: string; impact: string; help: string; nodes: string[] }[]).filter((v) => v.impact === 'serious' || v.impact === 'critical');
 }
+
+/** Waits until no panel is loading. */
+export async function settled(page: Page, timeout = 30_000): Promise<void> {
+  await page.waitForFunction(() => document.querySelectorAll('[aria-busy="true"], [data-state="loading"]').length === 0, null, { timeout });
+  await page.waitForTimeout(100);
+}
