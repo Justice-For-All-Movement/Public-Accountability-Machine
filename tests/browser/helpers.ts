@@ -34,7 +34,9 @@ export async function withApp(fn: (app: App) => Promise<void>, extraEnv: Record<
         const context = await browser.newContext({ colorScheme: options.colorScheme ?? 'light', viewport: { width: options.width ?? 1280, height: options.height ?? 900 } });
         const page = await context.newPage();
         const errors: string[] = [];
-        page.on('console', (m: { type(): string; text(): string }) => { if (m.type() === 'error') errors.push(m.text()); });
+        // Failed requests are reported with their address (the console only says "Failed to load resource").
+        page.on('console', (m: { type(): string; text(): string }) => { if (m.type() === 'error' && !m.text().startsWith('Failed to load resource')) errors.push(m.text()); });
+        page.on('response', (r: { status(): number; url(): string; request(): { method(): string } }) => { if (r.status() >= 400) errors.push(`HTTP ${r.status()} ${r.request().method()} ${r.url().replace(server.url, '')}`); });
         page.on('pageerror', (e: Error) => errors.push(`pageerror: ${e.message}`));
         return { page, errors };
       },
