@@ -2,32 +2,47 @@
 
 Single source of truth for where the completion assignment stands. Update at every checkpoint.
 
-_Last updated: 2026-11-10 (session 1, after the first usage-limit interruption)._
+_Last updated: 2026-11-10 05:20 UTC (after the second usage-limit interruption)._
 
 ## Repositories (branch `feature/pam-completion` in each)
 
-| Engine | Repository (`Justice-For-All-Movement/…`) | State of the completion work |
-|---|---|---|
-| E00 | Public-Accountability-Machine | Orchestration engine implemented, 7 tests on real PostgreSQL pass. Application server, engine wiring and UI not started. |
-| E01 | Identity-Authorization-and-Policy-Engine | Shared service kit 1.0.1 implemented and tested (source of truth). Engine service layer: worker started, nothing committed yet. |
-| E02 | Secure-Intake-Case-Workflow-Engine | Existing Next.js app (1.0.0-rc.9). Audit/integration contract work started, nothing committed yet. |
-| E03–E08, E11–E13 | (see `config/foundation.json`) | Existing foundation code only. Service-layer workers started, nothing committed yet. |
-| E09 | Editorial-and-Story-Development | Remote was empty. Fresh implementation started locally, nothing committed yet. |
-| E10 | Media-Production | Remote was empty. Fresh implementation started locally, nothing committed yet. |
-| E14 | Visual-workspace-and-audit-engine | Not started (scheduled with the application UI). |
+| Engine | Repository (`Justice-For-All-Movement/…`) | Commit | State |
+|---|---|---|---|
+| E00 | Public-Accountability-Machine | `3fcc16a` | Orchestration engine + application server (composition, gateway, event router, CLI). 12 tests pass; composed smoke test passes. No workflow actions, UI or acceptance tests yet. |
+| E01 | Identity-Authorization-and-Policy-Engine | `fa803a0` | Service layer complete. 103 tests pass. Live OIDC/intake not verified. |
+| E05 | Evidence-Storage-and-Provenance-Engine | `0764e4d` | Service layer complete. 94 tests pass; GitHub CI green. S3 and official ClamAV DB not verified. |
+| E11 | Consent-rights-and-use-decisions-engine | `9f6e8e1` | Service layer complete. 83 tests pass; GitHub CI green. |
+| E13 | Resources-and-commercial-operations-engine | `ed35585` | Service layer complete. 69 tests pass. Stripe adapter not verified (no credentials). |
+| E06 | Document-and-Media-Processing-Engine | `7e7af0c`+ | In progress (worker resumed). |
+| E07 | Knowledge-and-verification-engine | `7b592f4`+ | In progress, WIP pushed (worker resumed). |
+| E08 | Factual-investigation-engine | — | In progress, uncommitted work on disk (worker resumed). |
+| E12 | Packaging-release-and-correction-engine | — | In progress, uncommitted work on disk (worker resumed). |
+| E02 | Secure-Intake-Case-Workflow-Engine | — | Existing app (1.0.0-rc.9); completion/integration-contract work barely started. |
+| E03, E04 | Correspondence, Discovery | — | Existing foundation code; service layer barely started. |
+| E09, E10 | Editorial-and-Story-Development, Media-Production | — | Remotes were empty; fresh implementation barely started locally. |
+| E14 | Visual-workspace-and-audit-engine | — | Not started (scheduled with the application UI). |
 
 Note: the assignment named E09/E10 `…-engine`; the actual repositories are `Editorial-and-Story-Development` and
 `Media-Production`. Older engine manifests reference `github.com/neophilism/…` URLs; new work uses the organization URLs.
 
-## Working entry points
+## Working entry points (PAM)
 
-- `npm run check` in this repository (needs `TEST_DATABASE_URL`).
-- `src/orchestration/index.ts`: `migrate(sql)`, `createEngine({ sql, actions, ports })`, `routes(engine)`.
+```sh
+npm ci
+npm run engines:link        # development: symlink sibling checkouts into ./engines (or `engines:install` at pinned revisions)
+npm run migrate             # needs DATABASE_URL; prints which engines are ready
+npm run bootstrap-admin     # needs PAM_ADMIN_LOGIN, PAM_ADMIN_PASSWORD, PAM_ORG_NAME, IDENTITY_KEY_ENCRYPTION_KEY
+npm start                   # http://127.0.0.1:8080 — gateway /api/e/<engine>/v1/..., app routes /api/app/v1/...
+```
+
+Required env for a local run: `DATABASE_URL`, `IDENTITY_KEY_ENCRYPTION_KEY` (≥32 chars), `EVIDENCE_MASTER_KEY` (32 bytes
+base64), and either `CLAMAV_DATABASE_DIR` or the explicit `EVIDENCE_SCAN_POLICY=structural_only`.
 
 ## Executed tests (this environment: Node 24.22.2, PostgreSQL 16.15)
 
-- Identity engine `npm run check`: 88 pass (includes kit tests on real PostgreSQL).
-- PAM `npm run check`: 12 pass (7 orchestration tests on real PostgreSQL, 5 inventory/design-integrity tests).
+- PAM `npm run check`: 12 pass. Composed smoke test (clean database): bootstrap admin → login → purpose-scoped token →
+  evidence accept through the gateway → worker scan/release → health → invalid token refused (401).
+- Engine results as listed in the table; each engine's `docs/ENGINE_API.md` states what ran on real PostgreSQL and tools.
 
 ## Environment facts for the next session
 
@@ -40,8 +55,9 @@ Note: the assignment named E09/E10 `…-engine`; the actual repositories are `Ed
 
 ## Known defects / risks
 
-- None of the engines' service layers exist in committed form yet.
-- No model provider key is configured; agent reasoning will run through a deterministic local planner unless one is supplied.
+- Engines' vendored `DomainError` classes differ per copy; PAM unifies the check at load time (`unifyDomainError`).
+- No model provider key is configured; agent reasoning will run through deterministic planners unless one is supplied.
+- `engines.lock.json` revisions are still null (development uses `engines:link`); pin with `npm run engines:pin` at release.
 
 ## External blockers
 
@@ -50,7 +66,7 @@ Note: the assignment named E09/E10 `…-engine`; the actual repositories are `Ed
 
 ## Next concrete action
 
-1. Resume engine workers in small batches (E01, E05, E11, E13 first; then E06, E07, E08, E12; then E02, E03, E04; then E09, E10),
-   each committing and pushing work-in-progress early.
-2. Build the PAM application server: engine composition, event router, HTTP gateway, actions that drive acceptance test A.
-3. E14 + browser UI, then acceptance tests A–F with retained evidence.
+1. Let E06, E07, E08, E12 finish; then run E02, E03, E04, then E09, E10 (at most four workers at a time; each costs ~300k tokens).
+2. PAM: per-engine factories in `src/app/compose.ts` for each finished engine; workflow actions in `src/app/registry.ts`
+   driving acceptance test A (intake → evidence → processing → knowledge → investigation → package → legal-support draft).
+3. E14 + browser UI (`web/`), then acceptance tests A–F with retained evidence; pin engine revisions; open one PR per repository.
