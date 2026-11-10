@@ -66,8 +66,8 @@ unifyDomainError(DomainError);
 const WORKER = `pam-${process.pid}`;
 /** Engines name and parameterise their job pass differently; this is the one place that knows how. */
 function jobRunner(short: string, engine: AnyEngine): (() => Promise<number>) | null {
-  const stringArg = ['consent', 'resources'].includes(short);
-  const fn = typeof engine.runJobsOnce === 'function' ? engine.runJobsOnce : typeof engine.runJobs === 'function' ? engine.runJobs : null;
+  const stringArg = ['consent', 'resources', 'release'].includes(short);
+  const fn = [engine.runJobsOnce, engine.runJobs, engine.runWorkerOnce].find((f) => typeof f === 'function') ?? null;
   if (fn === null) return null;
   return async () => Number(await (stringArg ? fn.call(engine, WORKER) : fn.call(engine, { worker: WORKER })) ?? 0);
 }
@@ -122,9 +122,21 @@ export async function compose(env: Env, options: { actions?: (runtime: Runtime) 
   factories.knowledge = (m) => m.createEngine({ sql, ports: { evidence, useDecision: useDecisions, authorization } });
   factories.investigation = (m) => m.createEngine({ sql, objects: objectsFor(env, 'investigation'), ports: {
     evidence: adapters.investigationEvidencePort(need), processing: adapters.investigationProcessingPort(need), knowledge: adapters.investigationKnowledgePort(need),
-    ...(existsSync(join(enginesDir, 'discovery', 'src', 'engine', 'index.ts')) ? { discovery: port('discovery', 'Discovery') } : {}),
-    ...(existsSync(join(enginesDir, 'correspondence', 'src', 'engine', 'index.ts')) ? { correspondence: port('correspondence', 'Correspondence') } : {}),
+    discovery: adapters.investigationDiscoveryPort(need),
+    // The correspondence port drafts through the project's default mailbox (setting `correspondence.defaultMailbox`). It never sends.
+    correspondence: new Proxy({}, { get: (_t, method) => async (ctx: ServiceContext, ...rest: unknown[]) => {
+      const row = (await sql.query<{ value: string }>(`select value #>> '{}' as value from ${APP_SCHEMA}.settings where tenant_id=$1 and project_id=$2 and key='correspondence.defaultMailbox'`, [ctx.tenantId, ctx.projectId]))[0];
+      if (row === undefined) throw new DomainError('unavailable', 'No default mailbox is configured for this project');
+      const mod = await import(pathToFileURL(join(enginesDir, 'correspondence', 'src', 'engine', 'index.ts')).href) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+      return mod.correspondencePort(need('correspondence'), { mailboxId: row.value })[method as string](ctx, ...rest);
+    } }),
     budget, authorization } });
+  factories.discovery = (m) => m.createEngine({ sql, objects: objectsFor(env, 'discovery'), ports: { evidence, authorization, useDecision: useDecisions },
+    config: { userAgent: env.DISCOVERY_USER_AGENT ?? 'PAM-Research/0.1 (automated research assistant)', allowedPrivateHosts: (env.DISCOVERY_ALLOWED_PRIVATE_HOSTS ?? '').split(',').filter(Boolean),
+      ...(env.DISCOVERY_ALLOWED_PORTS ? { allowedPorts: env.DISCOVERY_ALLOWED_PORTS.split(',').map(Number) } : {}), ...(env.DISCOVERY_CREDENTIAL_KEY ? { credentialKey: env.DISCOVERY_CREDENTIAL_KEY } : {}), ...(env.DISCOVERY_MIN_INTERVAL_MS ? { defaultMinIntervalMs: Number(env.DISCOVERY_MIN_INTERVAL_MS) } : {}) } });
+  factories.correspondence = (m) => m.createEngine({ sql, objects: objectsFor(env, 'correspondence'), ports: { authorization, budget, evidence, useDecision: useDecisions },
+    config: { ...(env.CORRESPONDENCE_SECRET_KEY ? { secretKey: env.CORRESPONDENCE_SECRET_KEY } : {}), provider: { allowPrivateHosts: env.CORRESPONDENCE_ALLOW_PRIVATE_HOSTS === '1', allowInsecureTls: env.CORRESPONDENCE_ALLOW_INSECURE_TLS === '1' }, ...(env.CORRESPONDENCE_RECONCILE_DELAY_MS ? { reconcileDelayMs: Number(env.CORRESPONDENCE_RECONCILE_DELAY_MS) } : {}) } });
+  factories.editorial = (m) => m.createEngine({ sql, objects: objectsFor(env, 'editorial'), ports: { knowledge: adapters.editorialKnowledgePort(need), useDecisions, authorization } });
   factories.release = (m) => {
     // Jurisdiction packs are deployment data: every *.json file in PAM_JURISDICTION_PACKS_DIR.
     const dir = env.PAM_JURISDICTION_PACKS_DIR; const packs = dir && existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8'))) : [];
@@ -197,6 +209,13 @@ export async function compose(env: Env, options: { actions?: (runtime: Runtime) 
   runtimeRef.current = runtime;
   for (const [name, def] of Object.entries(options.actions?.(runtime) ?? {})) orchestration.registerAction(name, def);
   return runtime;
+}
+
+export async function setSetting(runtime: Runtime, ctx: ServiceContext, key: string, value: unknown): Promise<void> {
+  await runtime.sql.query(`insert into ${APP_SCHEMA}.settings (tenant_id, project_id, key, value, updated_by) values ($1,$2,$3,$4::jsonb,$5) on conflict (tenant_id, project_id, key) do update set value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [ctx.tenantId, ctx.projectId, key, JSON.stringify(value), ctx.actor.id]);
+}
+export async function getSetting<T = unknown>(runtime: Runtime, scope: Scope, key: string): Promise<T | null> {
+  return ((await runtime.sql.query<{ value: T }>(`select value from ${APP_SCHEMA}.settings where tenant_id=$1 and project_id=$2 and key=$3`, [scope.tenantId, scope.projectId, key]))[0]?.value) ?? null;
 }
 
 /** Creates PAM's orchestrator service identity in an organization. Requires a human administrator context for that organization. */

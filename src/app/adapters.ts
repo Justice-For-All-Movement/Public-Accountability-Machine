@@ -142,3 +142,45 @@ export function toReleasePackage(pkg: { ref: string; content: Json }): Json {
 export function toEvidenceItems(pkg: { content: Json }): Json {
   return (((pkg.content as Any).evidenceIndex ?? []) as Any[]).filter((e) => typeof e.ref === 'string').map((e) => ({ ref: e.ref as string, label: String(e.filename ?? e.ref), description: `sha256 ${String(e.sha256 ?? 'unknown')}; ${String(e.custodySummary ?? 'custody not reported')}`, basis: e.available === false ? 'original unavailable (provenance gap)' : 'preserved original' })) as unknown as Json;
 }
+
+// ───────────────────────────── E08 → E04 ─────────────────────────────
+export function investigationDiscoveryPort(get: Get) {
+  const itemOf = (i: Any) => ({ ref: String(i.ref), title: String(i.title ?? i.url ?? i.ref), ...(i.sourceId ? { sourceId: String(i.sourceId) } : {}), ...(i.evidenceRef ? { evidenceRef: String(i.evidenceRef) } : {}), ...(i.url ? { locator: String(i.url) } : {}) });
+  return {
+    async startCollectionRun(ctx: ServiceContext, input: { subject: string; objective: string; query: string; sourceIds?: readonly string[]; idempotencyKey: string }) {
+      const sourceId = input.sourceIds?.[0];
+      if (sourceId === undefined) throw new DomainError('invalid_input', 'A configured source is required to start a collection run');
+      const run = await get('discovery').startCollection(ctx, { sourceId, level: 'bytes', questionRef: input.subject, extractLeads: true, idempotencyKey: input.idempotencyKey }) as Any;
+      return { runRef: String(run.ref), state: String(run.state) };
+    },
+    async searchSource(ctx: ServiceContext, input: { query: string; sourceId?: string; limit?: number }) {
+      if (input.sourceId === undefined) return { items: [], searched: [], restricted: [] };
+      const attempt = await get('discovery').searchSource(ctx, { sourceId: input.sourceId, query: input.query }) as Any;
+      const items = ((attempt.items ?? attempt.results ?? []) as Any[]).slice(0, input.limit ?? 50).map(itemOf);
+      return { items, searched: [input.sourceId], restricted: attempt.outcome === 'access_restricted' ? [input.sourceId] : [] };
+    },
+    async getCoverage(ctx: ServiceContext, runRef: string) {
+      const discovery = get('discovery'); const runId = idOf(runRef);
+      const run = await discovery.getRun(ctx, runId) as Any; const cov = await discovery.coverage(ctx, { runId }) as Any;
+      const page = await discovery.listItems(ctx, { runId, limit: 200 }) as Any; const items = (Array.isArray(page) ? page : (page.items ?? [])) as Any[];
+      const leadPage = await discovery.listLeads(ctx, { limit: 200 }).catch(() => []) as Any; const leads = (Array.isArray(leadPage) ? leadPage : (leadPage.items ?? [])) as Any[];
+      const state = ['queued', 'running', 'completed', 'failed', 'cancelled'].includes(run.state) ? run.state : run.state === 'paused' ? 'queued' : 'running';
+      const total = Number(cov.acquiredBytes ?? 0) + Number(cov.acquiredMetadata ?? 0) + Number(cov.linkOnly ?? 0);
+      return { runRef, state, items: items.map(itemOf), contactLeads: leads.map((l) => ({ ref: String(l.ref), label: String(l.role ?? l.organization ?? 'contact lead') })),
+        sources: [{ sourceId: String(run.sourceId), status: Number(cov.accessRestricted ?? 0) > 0 && total === 0 ? 'access_restricted' : Number(cov.failed ?? 0) > 0 && total === 0 ? 'failed' : total === 0 ? 'zero_result' : 'searched', itemCount: Number(cov.discovered ?? items.length),
+          note: `acquired bytes ${cov.acquiredBytes ?? 0}, metadata ${cov.acquiredMetadata ?? 0}, links only ${cov.linkOnly ?? 0}, failed ${cov.failed ?? 0}, restricted ${cov.accessRestricted ?? 0}, gaps open ${cov.gaps?.open ?? 0}` }] };
+    },
+  };
+}
+
+// ───────────────────────────── E09 → E07 ─────────────────────────────
+export function editorialKnowledgePort(get: Get) {
+  return {
+    async getClaimStatus(ctx: ServiceContext, claimRef: string): Promise<{ factual: string; editorial: string; stale: boolean; blocked: boolean } | null> {
+      try {
+        const claim = await get('knowledge').getClaim(ctx, idOf(claimRef)) as Any;
+        return { factual: String(claim.assessments?.factual?.value ?? 'unassessed'), editorial: String(claim.assessments?.editorial?.value ?? 'unassessed'), stale: claim.stale === true, blocked: claim.blocked === true };
+      } catch (error) { if (error instanceof DomainError && error.code === 'not_found') return null; throw error; }
+    },
+  };
+}

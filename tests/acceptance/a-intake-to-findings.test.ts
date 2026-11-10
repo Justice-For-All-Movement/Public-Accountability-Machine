@@ -1,11 +1,24 @@
 // Acceptance test A (in progress): evidence → processing → knowledge → investigation → package, across two isolated
 // organizations, on the real composed application. Intake (E02), discovery (E04) and legal-support drafting (E12) join
 // this test as those engines land; until then their steps are absent, not simulated.
-import test from 'node:test';
+import test, { after } from 'node:test';
+import { createServer } from 'node:http';
 import assert from 'node:assert/strict';
-import { skipReason, withStack } from './harness.ts';
+import { REQUIRED, skipReason, withStack } from './harness.ts';
 
-const skip = skipReason();
+const skip = skipReason([...REQUIRED, 'discovery']);
+// Controlled retrieval source: a local HTTP server standing in for a public records site (fictional content).
+const pages: Record<string, { type: string; body: string; status?: number }> = {
+  '/records/': { type: 'text/html', body: '<html><head><title>Riverside Council records</title></head><body><h1>Published records</h1><ul><li><a href="/records/invoice-0312.txt">Invoice 0312</a></li><li><a href="/records/missing.txt">Withdrawn record</a></li></ul><a rel="next" href="/records/page2">next</a></body></html>' },
+  '/records/page2': { type: 'text/html', body: '<html><body><ul><li><a href="/records/approval-register.txt">Approval register, March</a></li><li><a href="/records/contact.html">Records office contact</a></li></ul></body></html>' },
+  '/records/contact.html': { type: 'text/html', body: '<html><head><title>Records office</title></head><body><h1>Records office</h1><p>Requests about payment approvals are handled by the Records Officer, Riverside Council: <a href="mailto:records@riverside-council.example.org">records@riverside-council.example.org</a></p></body></html>' },
+  '/records/invoice-0312.txt': { type: 'text/plain', body: 'Riverside Supplies Ltd. Invoice 0312 dated 2 March for 4,200: sandbags and pumps. No second invoice was issued in March.\n' },
+  '/records/approval-register.txt': { type: 'text/plain', body: 'Approval register, March. 3 March: payment 4,200 Riverside Supplies approved (M. Okafor). No entry for 9 March.\n' },
+};
+const source = createServer((req, res) => { const page = pages[req.url ?? '']; if (page === undefined) { res.writeHead(404).end('gone'); return; } res.writeHead(page.status ?? 200, { 'content-type': page.type }).end(page.body); });
+await new Promise<void>((ok) => source.listen(0, '127.0.0.1', ok));
+const sourcePort = (source.address() as { port: number }).port;
+after(() => { source.close(); });
 test('A: evidence is preserved, processed, linked to claims and investigated; a second organization sees nothing', { skip, timeout: 600_000 }, () => withStack(async (stack) => {
   const { runtime } = stack;
   const evidence = runtime.get('evidence'), processing = runtime.get('processing'), knowledge = runtime.get('knowledge'), investigation = runtime.get('investigation');
@@ -64,6 +77,34 @@ test('A: evidence is preserved, processed, linked to claims and investigated; a 
   await investigation.addHypothesis(research, q2.id, { explanation: 'The second transfer was an unauthorised duplicate.', predictedObservations: ['No approval record exists'] });
   await investigation.addHypothesis(research, q2.id, { explanation: 'The second transfer was a legitimate second invoice approved outside the ledger.', predictedObservations: ['A second invoice or approval exists elsewhere'] });
   await investigation.recordAttempt(research, inv.id, { kind: 'search', questionId: q2.id, target: 'approval records for 9 March', method: 'full-text search of processed evidence', outcome: 'zero_result', detail: 'No approval record found in preserved material.' });
+  // 3b. Acquire additional material from the controlled source; real receipts; failures and gaps stay visible.
+  const discovery = runtime.get('discovery');
+  const src = await discovery.createSource(research, { name: 'Riverside Council published records', kind: 'html_index', baseUrl: `http://127.0.0.1:${sourcePort}/records/`, accessTerms: 'Public records page; citation permitted, reproduction rights unknown.', reuse: 'citation_only', idempotencyKey: 'src' });
+  const run = await discovery.startCollection(research, { sourceId: src.id, level: 'bytes', questionRef: q2.ref, extractLeads: true, idempotencyKey: 'run' });
+  await stack.settle(async () => ['completed', 'failed', 'cancelled'].includes((await discovery.getRun(research, run.id)).state));
+  const cov = await discovery.coverage(research, { runId: run.id });
+  assert.equal((await discovery.getRun(research, run.id)).state, 'completed', JSON.stringify(cov));
+  assert.equal(cov.acquiredBytes, 3, `three originals acquired: ${JSON.stringify(cov)}`); assert.ok(cov.failed + cov.notFound >= 1, 'the withdrawn record is reported, not hidden');
+  const receipts = await discovery.listReceipts(research, { runId: run.id, limit: 50 });
+  const receiptList = (Array.isArray(receipts) ? receipts : receipts.items) as any[];
+  assert.ok(receiptList.some((r) => /approval-register/.test(JSON.stringify(r)) && /[0-9a-f]{64}/.test(JSON.stringify(r))), 'acquisition receipts record URL and digest');
+  const acquired = ((await discovery.listItems(research, { runId: run.id, limit: 50 })) as any); const acquiredItems: any[] = [];
+  for (const i of ((Array.isArray(acquired) ? acquired : acquired.items) as any[])) { const full = await discovery.getItem(research, i.id); const acq = (full.acquisitions as any[] | undefined)?.find((x) => x.evidenceRef); if (acq) acquiredItems.push({ ...full, evidenceRef: acq.evidenceRef }); }
+  assert.equal(acquiredItems.length, 3, 'acquired originals were handed to the evidence engine');
+  const registerItem = acquiredItems.find((i) => /approval-register/.test(i.url ?? i.canonicalUrl ?? JSON.stringify(i)))!;
+  await stack.settle(async () => (await evidence.describe(research, registerItem.evidenceRef))?.available === true);
+  const registerInfo = await evidence.describe(research, registerItem.evidenceRef);
+  assert.match(new TextDecoder().decode(await evidence.getBytes(research, registerItem.evidenceRef)), /No entry for 9 March/);
+  assert.match(JSON.stringify(await evidence.provenance(research, registerItem.evidenceRef)), /discovery/, 'evidence provenance names the acquisition');
+  const leadPage = await discovery.listLeads({ ...research, capabilities: [...research.capabilities, 'discovery:read_leads'] }, { limit: 20 }) as any;
+  assert.match(JSON.stringify(leadPage), /records@riverside-council\.example\.org/, 'a contact lead was extracted with its published route');
+  // SSRF: a loopback port that is not on the deployment allowlist is refused
+  const bad = await discovery.createSource(research, { name: 'Internal admin', kind: 'html_index', baseUrl: 'http://127.0.0.1:9/', accessTerms: 'n/a', idempotencyKey: 'bad' }).then(async (b: any) => { const r = await discovery.startCollection(research, { sourceId: b.id, level: 'bytes' }); await stack.settle(async () => ['completed', 'failed', 'cancelled'].includes((await discovery.getRun(research, r.id)).state)); return discovery.coverage(research, { runId: r.id }); }, (e: any) => ({ refused: e.code }));
+  assert.ok((bad as any).refused !== undefined || (bad as any).acquiredBytes === 0, 'non-allowlisted private address yields nothing'); 
+  await knowledge.addEvidenceLink(research, { target: { kind: 'claim', id: unauthorised.id }, evidenceRef: registerInfo.ref, selector: { kind: 'text', quote: 'No entry for 9 March' }, stance: 'supports', sourceType: 'official_record' });
+  await investigation.recordAttempt(research, inv.id, { kind: 'acquisition', questionId: q2.id, target: 'Riverside Council published records', method: 'collection run over the public records index', outcome: 'partial', detail: `3 originals acquired, ${cov.failed + cov.notFound} unavailable; receipts retained.`, refs: [run.ref, registerInfo.ref] });
+  console.log('acquired', registerInfo.ref, 'coverage', JSON.stringify({ discovered: cov.discovered, acquiredBytes: cov.acquiredBytes, failed: cov.failed, notFound: cov.notFound }));
+
   const finding = await investigation.createFinding(research, inv.id, { statement: 'The fund ledger records two transfers of 4,200 to Riverside Supplies Ltd, on 3 and 9 March.', label: 'verified_fact', classification: 'established', questionIds: [q1.id],
     supporting: [{ ref: a.ref, selector: { representation: rep.ref, segmentId: seg.id } }, { ref: paid.ref }], limitations: ['Only a ledger extract was available; bank statements were not obtained.'], confidence: { level: 'well_supported', basis: 'Primary ledger record' },
     checklist: { primary_source_checked: { status: 'done', note: 'ledger extract' }, independence_by_source_family: { status: 'not_applicable', note: 'single primary record' }, counter_evidence_searched: { status: 'done', note: 'minutes reviewed' }, alternative_explanations_addressed: { status: 'done', note: 'n/a to existence of transfers' }, subject_response_sought: { status: 'not_done', note: 'correspondence engine not yet connected in this test' }, dates_identities_confirmed: { status: 'done', note: 'dates from ledger' } } });
@@ -116,4 +157,4 @@ test('A: evidence is preserved, processed, linked to claims and investigated; a 
   assert.ok(tenantsOnDisk.has(orgA.tenantId)); assert.ok(!tenantsOnDisk.has(orgB.tenantId), 'no objects exist under the second organization');
   // a token for organization B cannot be minted by a member of A
   await assert.rejects(runtime.get('identity').issueAccessToken({ refreshToken: investigator.refreshToken, tenantId: orgB.tenantId, projectId: orgB.projectId, purpose: 'research' }));
-}));
+}, { DISCOVERY_ALLOWED_PRIVATE_HOSTS: `127.0.0.1:${sourcePort}`, DISCOVERY_ALLOWED_PORTS: `80,443,${sourcePort}`, DISCOVERY_MIN_INTERVAL_MS: '20' }));
