@@ -23,10 +23,10 @@ export type App = { stack: Stack; org: Org; url: string; browser: Browser;
   signIn(page: Page, person?: Person): Promise<void>;
   stop(): Promise<void> };
 
-export async function withApp(fn: (app: App) => Promise<void>, extraEnv: Record<string, string> = {}): Promise<void> {
+export async function withApp(fn: (app: App) => Promise<void>, extraEnv: Record<string, string> = {}, options: { worker?: boolean } = {}): Promise<void> {
   await withStack(async (stack) => {
     const org = await stack.createOrg('Fictional Accountability Collective');
-    const server = await startServer(stack.runtime, { port: 0, worker: true, workerIntervalMs: 300, webDir: new URL('../../web', import.meta.url).pathname });
+    const server = await startServer(stack.runtime, { port: 0, worker: options.worker ?? true, workerIntervalMs: 300, webDir: new URL('../../web', import.meta.url).pathname });
     const { chromium } = require('playwright') as { chromium: { launch(): Promise<Browser> } };
     const browser = await chromium.launch();
     const app: App = { stack, org, url: server.url, browser,
@@ -67,6 +67,17 @@ export async function axe(page: Page): Promise<{ id: string; impact: string; hel
 
 /** Waits until no panel is loading. */
 export async function settled(page: Page, timeout = 30_000): Promise<void> {
+  await page.locator('.pam-screen').first().waitFor({ timeout });
+  await page.waitForTimeout(250);
   await page.waitForFunction(() => document.querySelectorAll('[aria-busy="true"], [data-state="loading"]').length === 0, null, { timeout });
   await page.waitForTimeout(100);
+}
+
+/** Presses Tab until the focused element matches, returning false if it is never reached. */
+export async function tabTo(page: Page, matches: string, max = 250): Promise<boolean> {
+  for (let i = 0; i < max; i++) {
+    await page.keyboard.press('Tab');
+    if (await page.evaluate((sel: string) => document.activeElement !== null && document.activeElement.matches(sel), matches)) return true;
+  }
+  return false;
 }
