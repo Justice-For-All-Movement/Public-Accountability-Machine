@@ -100,10 +100,10 @@ test('objective, run and task board pause/resume; correspondence draft listed in
     assert.match(await card.innerText(), /Waits on 1 \(1 not done\)/);
     await card.getByRole('button', { name: 'Pause' }).click();
     await page.locator('[data-dialog="confirm"]').click(); // the control has an optional reason: it asks before sending
-    await page.locator('.ws-board__column[data-column="paused"] .ws-card', { hasText: 'review' }).waitFor();
+    await page.locator('.ws-board__column[data-column="paused"] .ws-card', { hasText: 'review (demo.note)' }).waitFor();
     await page.locator('.ws-card', { hasText: 'review (demo.note)' }).getByRole('button', { name: 'Resume' }).click();
     if (await page.locator('[data-dialog="confirm"]').count()) await page.locator('[data-dialog="confirm"]').click();
-    await page.locator('.ws-board__column[data-column="review"] .ws-card', { hasText: 'review' }).waitFor();
+    await page.locator('.ws-board__column[data-column="review"] .ws-card', { hasText: 'review (demo.note)' }).waitFor();
     const tasks = await app.stack.runtime.orchestration.listTasks(await app.org.as(app.org.owner, 'administration'), {});
     assert.equal(tasks.find((t: { key: string }) => t.key === 'review')?.state, 'awaiting_approval', 'resume restored the previous state');
 
