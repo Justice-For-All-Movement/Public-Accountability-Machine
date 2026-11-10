@@ -24,11 +24,34 @@ Requirement-level status: `docs/COVERAGE.md`. Installation: `docs/INSTALL.md`.
 | E07 | Knowledge-and-verification-engine | ad3617e |
 | E08 | Factual-investigation-engine | 5951942 |
 | E09 | Editorial-and-Story-Development (was empty) | 0639821 |
-| E10 | Media-Production (was empty) | 9d5b3cb |
+| E10 | Media-Production (was empty) | 6a77e38 |
 | E11 | Consent-rights-and-use-decisions-engine | 9f6e8e1 |
 | E12 | Packaging-release-and-correction-engine | 0a58ff4 |
 | E13 | Resources-and-commercial-operations-engine | ed35585 |
 | E14 | Visual-workspace-and-audit-engine | 27f2a14 |
+
+## Independent engine checks (each engine's own `npm run check` from a clean install at its pinned revision, PostgreSQL 16)
+
+| Engine | Tests passed | Failed |
+|---|---|---|
+| E01 Identity | 103 | 0 |
+| E03 Correspondence | 115 | 0 |
+| E04 Discovery | 75 | 0 |
+| E05 Evidence | 127 | 0 |
+| E06 Processing | 167 | 0 |
+| E07 Knowledge | 170 | 0 |
+| E08 Investigation | 60 | 0 |
+| E09 Editorial | 21 | 0 |
+| E10 Production | 16 | 0 |
+| E11 Consent | 83 | 0 |
+| E12 Release | 57 | 0 |
+| E13 Resources | 69 | 0 |
+| E14 Workspace | 152 | 0 |
+| E02 Intake | 170 unit + 21 real-Postgres/browser integration (worker run) | 0 |
+
+Three defects were found only by these clean installs and fixed: an incomplete lockfile (E12), a kit test assuming immediate
+event visibility on a shared server (E01), and a timestamped PNG fixture making a replay test timing-dependent (E10).
+PAM itself: 12 checks, 6 browser tests, acceptance A–E all pass.
 
 ## Environment facts for the next session
 
