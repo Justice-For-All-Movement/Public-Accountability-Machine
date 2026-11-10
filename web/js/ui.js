@@ -64,6 +64,8 @@ export function renderEmpty(el, title, message, action) {
  */
 export function section(el, load, render, label = 'Loading…') {
   const run = async () => {
+    // A confirmation shown by a form inside this section survives the reload that the form itself triggered.
+    const kept = [...el.querySelectorAll('.pam-form-status, .pam-action-result')].map((x) => x.textContent).filter((t) => t && !t.startsWith('Sent;')).pop();
     clear(el);
     const holder = h('div', { class: 'pam-state', dataset: { state: 'loading' } });
     el.append(holder);
@@ -72,6 +74,7 @@ export function section(el, load, render, label = 'Loading…') {
     try {
       const data = await load();
       clear(el);
+      if (kept) el.append(h('p', { class: 'pam-kept-status ws-notice', text: `Last result: ${kept}` }));
       render(data, el, run);
     } catch (error) { renderError(el, error, run); }
     finally { el.removeAttribute('aria-busy'); }

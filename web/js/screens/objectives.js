@@ -75,8 +75,8 @@ async function objectiveDetail(el, ctx, id) {
     body.append(form({ legend: 'Add a directive for the agents', submit: 'Add directive', fields: [{ name: 'body', label: 'Directive', type: 'textarea', required: true }], onSubmit: async (v) => { await api('orchestration', `/v1/objectives/${id}/directives`, { purpose: ctx.purpose, body: { body: v.body } }); return 'Directive recorded.'; } }));
   });
   const boardHolder = h('div', {}); board.body.append(boardHolder);
-  let boardHandle = null;
-  reloadBoard = () => section(boardHolder, async () => {
+  let boardHandle = null; let focusRef = null;
+  reloadBoard = (refToFocus = null) => { focusRef = refToFocus; return section(boardHolder, async () => {
     const tasks = await api('orchestration', '/v1/tasks', { purpose: ctx.purpose, query: { objectiveId: id } });
     return { tasks, controls: await controlsFor(ctx, tasks.map((t) => t.ref)) };
   }, ({ tasks, controls }, body) => {
@@ -87,8 +87,10 @@ async function objectiveDetail(el, ctx, id) {
     const edges = tasks.flatMap((t) => t.dependsOn.map((d) => byKey.get(`${t.runId}:${d}`) ?? byKey.get(d)).filter(Boolean).map((dep) => ({ from: t.ref, to: dep.ref, relation: 'source' })));
     const items = tasks.map((t) => ({ ref: t.ref, title: `${t.title} (${t.action})`, state: taskDisplayState(t), engineState: t.state, staleReasons: [...(t.staleReasons ?? []), ...(t.pauseReason ? [t.pauseReason] : []), ...(t.error ? [t.error] : [])] }));
     const holder = h('div', {}); body.append(holder);
-    boardHandle = TaskBoard(holder, { items, edges, controlsByRef: controls, headingLevel: 3, onSelect: (r) => import('../ui.js').then((m) => m.openInspector(r)), onInvoke: invoker(ctx, () => reloadBoard()) });
-  });
+    boardHandle = TaskBoard(holder, { items, edges, controlsByRef: controls, headingLevel: 3, onSelect: (r) => import('../ui.js').then((m) => m.openInspector(r)), onInvoke: invoker(ctx, (r) => reloadBoard(r)) });
+    // After a control, keep keyboard focus on the same task in its new column.
+    if (focusRef) { const card = [...holder.querySelectorAll('.ws-card')].find((c) => c.dataset.ref === focusRef); card?.querySelector('.ws-link')?.focus(); focusRef = null; }
+  }); };
   reloadBoard();
   const reloadRuns = section(runs.body, () => api('orchestration', '/v1/runs', { purpose: ctx.purpose, query: { objectiveId: id } }), (rows, body) => {
     if (rows.length === 0) { renderEmpty(body.appendChild(h('div', {})), 'No runs yet', 'Start a run from a workflow or with ad-hoc tasks.'); return; }
@@ -118,7 +120,7 @@ function invoker(ctx, after) {
   return async (r, controlId, input, { confirm }) => {
     const out = await api('workspace', '/v1/controls/invoke', { purpose: ctx.purpose, body: { ref: r, controlId, input, confirm } });
     announce(`${controlId}: ${out.outcome}.`);
-    setTimeout(after, 50);
+    setTimeout(() => after(r), 50);
     return out;
   };
 }
