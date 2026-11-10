@@ -271,7 +271,9 @@ export async function alignRoleCatalog(runtime: Runtime, ctx: ServiceContext): P
   // The correspondence engine names drafting `correspondence:write`; the seeded drafting agent only holds `correspondence:draft`.
   const wanted: Record<string, string[]> = { agent_drafter: ['correspondence:write'],
     // Handing an approved editorial revision to production, and exporting finished renders, are exact sensitive actions.
-    editor: ['editorial:export'], producer: ['production:export'] };
+    editor: ['editorial:export'], producer: ['production:export'],
+    // A human operator approves or rejects work that agents or models proposed; exporting the audit trail is exact.
+    admin: ['orchestration:approve', 'workspace:export'] };
   for (const [name, add] of Object.entries(wanted)) {
     const role = roles.find((r) => r.name === name);
     if (role === undefined || add.every((c) => role.capabilities.includes(c))) continue;
@@ -279,7 +281,7 @@ export async function alignRoleCatalog(runtime: Runtime, ctx: ServiceContext): P
     return true;
   }
   const purposes = await identity.listPurposes(ctx) as { name: string; description: string; capabilities: string[] }[];
-  const purposeWanted: Record<string, string[]> = { editorial: ['editorial:export'], production: ['production:export'] };
+  const purposeWanted: Record<string, string[]> = { editorial: ['editorial:export'], production: ['production:export'], administration: ['orchestration:approve', 'workspace:export'], audit: ['workspace:export'] };
   for (const [name, add] of Object.entries(purposeWanted)) {
     const purpose = purposes.find((p) => p.name === name);
     if (purpose === undefined || add.every((c) => purpose.capabilities.includes(c))) continue;
