@@ -156,6 +156,9 @@ export async function compose(env: Env, options: { actions?: (runtime: Runtime) 
     get: (_t, id) => (id === 'E00' ? runtimeRef.current?.orchestration : typeof id === 'string' && ENGINE_IDS[id] !== undefined ? maybe(ENGINE_IDS[id] as string) ?? undefined : undefined),
     has: (_t, id) => id === 'E00' || (typeof id === 'string' && ENGINE_IDS[id] !== undefined && maybe(ENGINE_IDS[id] as string) !== null),
   });
+  if (env.PAM_DATA_DIR) mkdirSync(join(resolve(env.PAM_DATA_DIR), 'tmp', 'production'), { recursive: true });
+  factories.production = (m) => m.createEngine({ sql, objects: objectsFor(env, 'production'), ports: { useDecisions, budget, authorization },
+    config: { ...(env.PAM_DATA_DIR ? { workRoot: join(resolve(env.PAM_DATA_DIR), 'tmp', 'production') } : {}) } });
   factories.workspace = (m) => m.createEngine({ sql, ports: { engines: engineMap, controls: { E00: orchestrationControls(() => runtimeRef.current) } } });
   factories.release = (m) => {
     // Jurisdiction packs are deployment data: every *.json file in PAM_JURISDICTION_PACKS_DIR.
@@ -266,11 +269,21 @@ export async function alignRoleCatalog(runtime: Runtime, ctx: ServiceContext): P
   const identity = runtime.get('identity');
   const roles = await identity.listRoles(ctx) as { name: string; description: string; capabilities: string[]; actorKinds: string[] }[];
   // The correspondence engine names drafting `correspondence:write`; the seeded drafting agent only holds `correspondence:draft`.
-  const wanted: Record<string, string[]> = { agent_drafter: ['correspondence:write'] };
+  const wanted: Record<string, string[]> = { agent_drafter: ['correspondence:write'],
+    // Handing an approved editorial revision to production, and exporting finished renders, are exact sensitive actions.
+    editor: ['editorial:export'], producer: ['production:export'] };
   for (const [name, add] of Object.entries(wanted)) {
     const role = roles.find((r) => r.name === name);
     if (role === undefined || add.every((c) => role.capabilities.includes(c))) continue;
     await identity.defineRole(ctx, { name, description: role.description, capabilities: [...role.capabilities, ...add], actorKinds: role.actorKinds });
+    return true;
+  }
+  const purposes = await identity.listPurposes(ctx) as { name: string; description: string; capabilities: string[] }[];
+  const purposeWanted: Record<string, string[]> = { editorial: ['editorial:export'], production: ['production:export'] };
+  for (const [name, add] of Object.entries(purposeWanted)) {
+    const purpose = purposes.find((p) => p.name === name);
+    if (purpose === undefined || add.every((c) => purpose.capabilities.includes(c))) continue;
+    await identity.definePurpose(ctx, { name, description: purpose.description, capabilities: [...purpose.capabilities, ...add] });
     return true;
   }
   return false;
