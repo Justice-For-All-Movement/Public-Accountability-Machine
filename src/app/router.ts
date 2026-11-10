@@ -18,7 +18,7 @@ export const RULES: readonly Rule[] = [
   { match: /^evidence\.version_added$/, kind: 'source_superseded', to: DOWN_FROM_SOURCE, refs: (e) => [...strings(payload(e).previous), e.subject.split('@')[0] as string] },
   { match: /^evidence\.(stale|integrity_failed)$/, kind: 'source_corrected', to: DOWN_FROM_SOURCE },
   { match: /^evidence\.(blocked|restricted)$/, kind: 'rights_changed', to: DOWN_FROM_SOURCE },
-  { match: /^processing\.text_corrected$/, kind: 'source_corrected', to: ['knowledge', 'investigation', 'editorial', 'production', 'release'], refs: (e) => [e.subject, ...strings(payload(e).evidence), ...strings(payload(e).evidenceVersion), ...strings(payload(e).representation), ...strings(payload(e).refs)] },
+  { match: /^processing\.text_corrected$/, kind: 'source_corrected', to: ['knowledge', 'investigation', 'editorial', 'production', 'release'], refs: (e) => [e.subject, ...strings(payload(e).previousRef), ...strings(payload(e).representationRef), ...strings(payload(e).stale)] },
   { match: /^processing\..*(stale|blocked)$/, kind: 'source_corrected', to: ['knowledge', 'investigation', 'editorial', 'production', 'release'] },
   { match: /^knowledge\.claim_(stale|changed)$/, kind: 'claim_changed', to: DOWN_FROM_CLAIM, refs: (e) => [e.subject, ...strings(payload(e).claims), ...strings(payload(e).affected)] },
   { match: /^knowledge\.claim_blocked$/, kind: 'rights_changed', to: DOWN_FROM_CLAIM, refs: (e) => [e.subject, ...strings(payload(e).claims), ...strings(payload(e).affected)] },

@@ -163,7 +163,7 @@ export async function compose(env: Env, options: { actions?: (runtime: Runtime) 
     const root = join(resolve(env.PAM_DATA_DIR ?? './data'), 'destinations'); mkdirSync(root, { recursive: true });
     return m.createEngine({ sql, objects: objectsFor(env, 'release'), ports: { useDecision: useDecisions, authorization, evidence,
       useRegister: { recordUse: async (ctx: ServiceContext, input: unknown) => need('consent').recordUse({ ...(await serviceContext({ tenantId: ctx.tenantId, projectId: ctx.projectId })), requestId: ctx.requestId }, input) } },
-      config: { jurisdictionPacks: packs, destinations: { roots: [root, ...(env.RELEASE_DESTINATION_ROOTS ? env.RELEASE_DESTINATION_ROOTS.split(':') : [])], ...(env.RELEASE_DOWNLOAD_SECRET ? { downloadSecret: env.RELEASE_DOWNLOAD_SECRET } : {}), ...(env.PAM_PUBLIC_URL ? { publicBaseUrl: `${env.PAM_PUBLIC_URL}/api/e/release` } : {}) },
+      config: { jurisdictionPacks: packs, destinations: { roots: { review_portal: root, ...Object.fromEntries((env.RELEASE_DESTINATION_ROOTS ?? '').split(',').filter(Boolean).map((pair) => pair.split('=') as [string, string])) }, ...(env.RELEASE_DOWNLOAD_SECRET ? { downloadSecret: env.RELEASE_DOWNLOAD_SECRET } : {}), ...(env.PAM_PUBLIC_URL ? { publicBaseUrl: `${env.PAM_PUBLIC_URL}/api/e/release` } : {}) },
         ...(env.RELEASE_ACCOUNTABILITY_POLICY ? { accountabilityPolicy: env.RELEASE_ACCOUNTABILITY_POLICY } : {}) } });
   };
   const generic = (short: string) => (m: Record<string, any>): unknown => m.createEngine({ sql, objects: objectsFor(env, short), ports: { authorization, useDecisions, evidence, budget }, config: {} }); // eslint-disable-line @typescript-eslint/no-explicit-any
