@@ -14,6 +14,7 @@ import { routes as orchestrationRoutes } from '../orchestration/index.ts';
 import { APP_SCHEMA, alignRoleCatalog, provisionOrganization } from './compose.ts';
 import type { Runtime } from './compose.ts';
 import { routeEventsOnce } from './router.ts';
+import { toEvidenceItems, toReleasePackage } from './adapters.ts';
 import type { RouterReport } from './router.ts';
 import { intakeLinks, syncIntakeOnce } from './intake.ts';
 import type { IntakeReport } from './intake.ts';
@@ -53,6 +54,15 @@ export function appRoutes(runtime: Runtime, state: AppState, extra: (runtime: Ru
       const rows = await runtime.sql.query<{ intake_kind: string; intake_id: string; pam_ref: string; created_at: Date }>(`select intake_kind, intake_id, pam_ref, created_at from ${APP_SCHEMA}.intake_links where tenant_id=$1 order by created_at desc limit 500`, [r.ctx.tenantId]);
       const links = rows.filter((x) => visible.has(x.pam_ref.split('@')[0])).map((x) => { const inv = visible.get(x.pam_ref.split('@')[0]) as { id: string; state: string; data: { title: string } }; return { intakeKind: x.intake_kind, intakeId: x.intake_id, ref: x.pam_ref, investigationId: inv.id, title: inv.data.title, state: inv.state, linkedAt: x.created_at.toISOString() }; });
       return { configured, intakeUrl: runtime.env.PAM_INTAKE_PUBLIC_URL ?? null, links } as unknown as Json;
+    } },
+    // Pure conversion of an investigation package (E08, fetched by the caller with its own token) into release builder
+    // input (E12): the same mapping the orchestration actions use. Reads and writes nothing.
+    { method: 'POST', path: '/v1/release/inputs', handler: async (r) => {
+      requireCapability(r.ctx, 'release:read');
+      const body = r.body as { package?: { ref?: unknown; content?: unknown } } | null;
+      if (body === null || typeof body !== 'object' || body.package === undefined || typeof body.package.ref !== 'string' || body.package.content === null || typeof body.package.content !== 'object') throw new DomainError('invalid_input', 'package { ref, content } is required');
+      const pkg = { ref: body.package.ref, content: body.package.content as Json };
+      return { package: toReleasePackage(pkg), items: toEvidenceItems(pkg) } as unknown as Json;
     } },
     ...extra(runtime),
   ];
