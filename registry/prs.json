@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "repository": "neophilism/Public-Accountability-Machine",
+  "repository": "Justice-For-All-Movement/Public-Accountability-Machine",
   "roadmapVersion": 1,
   "planVerified": true,
   "plannedPrCount": 9,
-  "haltAfterFoundation": true,
+  "haltAfterFoundation": false,
   "units": [
     {
       "id": "PAM-000",
@@ -224,5 +224,6 @@
     }
   ],
   "observedAt": "2026-11-01T20:45:00Z",
-  "pullRequests": []
+  "pullRequests": [],
+  "supersededNote": "The foundation-only halt and per-task PR sequence were superseded by the owner completion assignment of 2026-11-09. Unit identifiers, requirements and acceptance criteria are unchanged; evidence is tracked in docs/COVERAGE.md."
 }

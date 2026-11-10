@@ -1,99 +1,104 @@
 {
-  "schemaVersion": 1,
-  "repository": "neophilism/Public-Accountability-Machine",
-  "stage": "foundation-only",
-  "operationalHold": true,
-  "effects": {
-    "executeTasks": false,
-    "investigate": false,
-    "fileClaims": false,
-    "sendMessages": false,
-    "publish": false,
-    "spend": false,
-    "deploy": false
-  },
+  "schemaVersion": 2,
+  "repository": "Justice-For-All-Movement/Public-Accountability-Machine",
+  "stage": "integrated-application",
+  "supersedes": "foundation-only",
   "engines": [
     {
       "id": "E01",
-      "repository": "neophilism/Identity-Authorization-and-Policy-Engine",
+      "repository": "Justice-For-All-Movement/Identity-Authorization-and-Policy-Engine",
+      "revision": null,
       "integrationStatus": "not_connected",
       "qualification": "not_verified"
     },
     {
       "id": "E02",
-      "repository": "neophilism/Secure-Intake-Case-Workflow-Engine",
+      "repository": "Justice-For-All-Movement/Secure-Intake-Case-Workflow-Engine",
+      "revision": null,
       "integrationStatus": "not_connected",
       "qualification": "not_verified"
     },
     {
       "id": "E03",
-      "repository": "neophilism/Correspondence-and-Outreach-Engine",
+      "repository": "Justice-For-All-Movement/Correspondence-and-Outreach-Engine",
+      "revision": null,
       "integrationStatus": "not_connected",
       "qualification": "not_verified"
     },
     {
       "id": "E04",
-      "repository": "neophilism/Discovery-and-Acquisition-Engine",
+      "repository": "Justice-For-All-Movement/Discovery-and-Acquisition-Engine",
+      "revision": null,
       "integrationStatus": "not_connected",
       "qualification": "not_verified"
     },
     {
       "id": "E05",
-      "repository": "neophilism/Evidence-Storage-and-Provenance-Engine",
+      "repository": "Justice-For-All-Movement/Evidence-Storage-and-Provenance-Engine",
+      "revision": null,
       "integrationStatus": "not_connected",
       "qualification": "not_verified"
     },
     {
       "id": "E06",
-      "repository": "neophilism/Document-and-Media-Processing-Engine",
+      "repository": "Justice-For-All-Movement/Document-and-Media-Processing-Engine",
+      "revision": null,
       "integrationStatus": "not_connected",
       "qualification": "not_verified"
     },
     {
       "id": "E07",
-      "repository": "neophilism/Knowledge-and-verification-engine",
+      "repository": "Justice-For-All-Movement/Knowledge-and-verification-engine",
+      "revision": null,
       "integrationStatus": "not_connected",
       "qualification": "not_verified"
     },
     {
       "id": "E08",
-      "repository": "neophilism/Factual-investigation-engine",
+      "repository": "Justice-For-All-Movement/Factual-investigation-engine",
+      "revision": null,
       "integrationStatus": "not_connected",
       "qualification": "not_verified"
     },
     {
       "id": "E09",
-      "repository": "neophilism/Editorial-and-story-development-engine",
+      "repository": "Justice-For-All-Movement/Editorial-and-Story-Development",
+      "revision": null,
       "integrationStatus": "not_connected",
       "qualification": "not_verified"
     },
     {
       "id": "E10",
-      "repository": "neophilism/Media-production-engine",
+      "repository": "Justice-For-All-Movement/Media-Production",
+      "revision": null,
       "integrationStatus": "not_connected",
       "qualification": "not_verified"
     },
     {
       "id": "E11",
-      "repository": "neophilism/Consent-rights-and-use-decisions-engine",
+      "repository": "Justice-For-All-Movement/Consent-rights-and-use-decisions-engine",
+      "revision": null,
       "integrationStatus": "not_connected",
       "qualification": "not_verified"
     },
     {
       "id": "E12",
-      "repository": "neophilism/Packaging-release-and-correction-engine",
+      "repository": "Justice-For-All-Movement/Packaging-release-and-correction-engine",
+      "revision": null,
       "integrationStatus": "not_connected",
       "qualification": "not_verified"
     },
     {
       "id": "E13",
-      "repository": "neophilism/Resources-and-commercial-operations-engine",
+      "repository": "Justice-For-All-Movement/Resources-and-commercial-operations-engine",
+      "revision": null,
       "integrationStatus": "not_connected",
       "qualification": "not_verified"
     },
     {
       "id": "E14",
-      "repository": "neophilism/Visual-workspace-and-audit-engine",
+      "repository": "Justice-For-All-Movement/Visual-workspace-and-audit-engine",
+      "revision": null,
       "integrationStatus": "not_connected",
       "qualification": "not_verified"
     }

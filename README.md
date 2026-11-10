@@ -1,30 +1,35 @@
 # Public Accountability Machine
 
-Country-neutral downstream application for the independent accountability engine suite. **Foundation only; operational implementation is on hold.**
+Autonomous, human-supervised investigation, accountability and multimedia-production platform. This repository holds the
+orchestration engine (E00) and the integrated application that coordinates fourteen independent engines (E01–E14).
 
-The first push establishes the repository before upstream completion, as explicitly authorized by the owner. Application work stops after this checkpoint; independent dependency-engine development continues.
+**Status: under active completion — not yet a finished product.** See [docs/CONTINUATION.md](docs/CONTINUATION.md) for exactly
+what works, what has been tested and what remains. Nothing here is deployed, and no live provider has been verified.
 
-## What exists
+## What exists today
 
-- Architecture and data-ownership boundaries for downstream composition.
-- Static inventory of fourteen independent upstream engine repositories.
-- Original fifteen-engine design, 122-task suite backlog, requirements and proposed contracts, retained byte-for-byte.
-- A canonical registry preserving all eight original M07 orchestration task IDs and a separate PAM-000 foundation unit.
-- A zero-dependency Node 24 metadata validator, rejection tests and GitHub CI.
+- `src/orchestration/` — E00: objectives, directives, workflow definitions, task graphs with dependencies, persistent agents
+  with project-scoped memory, runs, checkpoints, leases, retries, pause/resume/cancel/reassign, policy-gated proposals,
+  budget reservation and crash recovery that marks unknown side effects `uncertain` instead of repeating them.
+- `src/service-kit.ts` — the shared engine service kit (vendored from the Identity engine).
+- `docs/ENGINE_SERVICE_CONVENTION.md` — the convention all engines follow.
+- The original fifteen-engine design, 122-task backlog and requirements, retained byte-for-byte under `docs/approved-design/`.
 
-## Check the foundation
+## Check
 
 ```sh
-npm ci --ignore-scripts
-npm run check
+npm ci
+TEST_DATABASE_URL=postgresql://USER:PASS@127.0.0.1:5432/postgres npm run check
 ```
 
-These commands validate checked-in development metadata. They do not connect to engines, run an investigation, generate legal filings, produce media, send messages, publish, spend or deploy. No upstream connection or live acceptance is claimed.
+Tests that need PostgreSQL create and drop their own databases; without `TEST_DATABASE_URL` they are reported as skipped.
 
 ## Read next
 
 - [Architecture](docs/ARCHITECTURE.md)
-- [Foundation checkpoint and stopping point](docs/FOUNDATION_CHECKPOINT.md)
+- [Continuation record](docs/CONTINUATION.md)
+- [Engine service convention](docs/ENGINE_SERVICE_CONVENTION.md)
+- [Foundation checkpoint (historical)](docs/FOUNDATION_CHECKPOINT.md)
 - [Dependency inventory](config/foundation.json)
 - [Application work registry](registry/prs.json)
 - [Original approved design](docs/approved-design/engine_catalog.json)
@@ -32,4 +37,3 @@ These commands validate checked-in development metadata. They do not connect to 
 - [Recovery provenance](docs/approved-design/provenance.json)
 - [Contributor instructions](AGENTS.md)
 
-All AM-07 operational tasks remain planned. White labeling, localization, verified legal workflows, creative production and hosted application acceptance remain future downstream work. Country-specific data and private deployment policies are excluded from this public source.

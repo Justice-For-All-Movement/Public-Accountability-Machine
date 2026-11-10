@@ -6,3 +6,7 @@ coverage/
 private/
 recovery/
 *.zip
+dist/
+engines/
+data/
+artifacts/
