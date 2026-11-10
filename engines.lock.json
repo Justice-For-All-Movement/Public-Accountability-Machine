@@ -2,19 +2,76 @@
   "comment": "Exact engine source revisions PAM is composed from. scripts/bootstrap-engines.mjs materialises them under engines/.",
   "owner": "Justice-For-All-Movement",
   "engines": {
-    "identity": { "id": "E01", "repository": "Identity-Authorization-and-Policy-Engine", "revision": null },
-    "intake": { "id": "E02", "repository": "Secure-Intake-Case-Workflow-Engine", "revision": null, "external": true },
-    "correspondence": { "id": "E03", "repository": "Correspondence-and-Outreach-Engine", "revision": null },
-    "discovery": { "id": "E04", "repository": "Discovery-and-Acquisition-Engine", "revision": null },
-    "evidence": { "id": "E05", "repository": "Evidence-Storage-and-Provenance-Engine", "revision": null },
-    "processing": { "id": "E06", "repository": "Document-and-Media-Processing-Engine", "revision": null },
-    "knowledge": { "id": "E07", "repository": "Knowledge-and-verification-engine", "revision": null },
-    "investigation": { "id": "E08", "repository": "Factual-investigation-engine", "revision": null },
-    "editorial": { "id": "E09", "repository": "Editorial-and-Story-Development", "revision": null },
-    "production": { "id": "E10", "repository": "Media-Production", "revision": null },
-    "consent": { "id": "E11", "repository": "Consent-rights-and-use-decisions-engine", "revision": null },
-    "release": { "id": "E12", "repository": "Packaging-release-and-correction-engine", "revision": null },
-    "resources": { "id": "E13", "repository": "Resources-and-commercial-operations-engine", "revision": null },
-    "workspace": { "id": "E14", "repository": "Visual-workspace-and-audit-engine", "revision": null }
+    "identity": {
+      "id": "E01",
+      "repository": "Identity-Authorization-and-Policy-Engine",
+      "revision": "fa803a0fd458969c858c50540e0d1a96033bab62"
+    },
+    "intake": {
+      "id": "E02",
+      "repository": "Secure-Intake-Case-Workflow-Engine",
+      "revision": "47443485a53e6ca69aad0ae69412ee21b3b4af1b",
+      "external": true
+    },
+    "correspondence": {
+      "id": "E03",
+      "repository": "Correspondence-and-Outreach-Engine",
+      "revision": "585d5d0ca8e73dfa006a93678c05a02773c7f532"
+    },
+    "discovery": {
+      "id": "E04",
+      "repository": "Discovery-and-Acquisition-Engine",
+      "revision": "530dbdb03d4441c03d3b0497128319b141c79e63"
+    },
+    "evidence": {
+      "id": "E05",
+      "repository": "Evidence-Storage-and-Provenance-Engine",
+      "revision": "0764e4d1d485caaf69aa4da5ca6f60b8b3ec46dc"
+    },
+    "processing": {
+      "id": "E06",
+      "repository": "Document-and-Media-Processing-Engine",
+      "revision": "3d0f4fb8851034ec1f304a03a77ad3ed33b35e5e"
+    },
+    "knowledge": {
+      "id": "E07",
+      "repository": "Knowledge-and-verification-engine",
+      "revision": "ad3617e10a5e38eb0c78e503a357e6a6f96eb3e8"
+    },
+    "investigation": {
+      "id": "E08",
+      "repository": "Factual-investigation-engine",
+      "revision": "5951942de0e8e5e0900262fe573af0b105b6ea49"
+    },
+    "editorial": {
+      "id": "E09",
+      "repository": "Editorial-and-Story-Development",
+      "revision": "0639821bcd2efd4a6c0c3d6bc8961cbd3579d4f6"
+    },
+    "production": {
+      "id": "E10",
+      "repository": "Media-Production",
+      "revision": "9d5b3cbfde11be988ea48583cdae5b47d39918c0"
+    },
+    "consent": {
+      "id": "E11",
+      "repository": "Consent-rights-and-use-decisions-engine",
+      "revision": "9f6e8e1224aabba016e84fc10a3ddf8945b1f2bc"
+    },
+    "release": {
+      "id": "E12",
+      "repository": "Packaging-release-and-correction-engine",
+      "revision": "0a58ff4fe507efec99d10a7f0a06d28c56337f24"
+    },
+    "resources": {
+      "id": "E13",
+      "repository": "Resources-and-commercial-operations-engine",
+      "revision": "ed355857cc86ee4368b98ac0dd5dc79fce19544e"
+    },
+    "workspace": {
+      "id": "E14",
+      "repository": "Visual-workspace-and-audit-engine",
+      "revision": "27f2a14e89ce2e8449c383c46fe95a020f29be6b"
+    }
   }
 }
