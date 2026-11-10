@@ -11,11 +11,11 @@ import type { Json } from '../contracts.ts';
 import { createHttpHandler, requireCapability } from '../service-kit.ts';
 import type { Route } from '../service-kit.ts';
 import { routes as orchestrationRoutes } from '../orchestration/index.ts';
-import { alignRoleCatalog, provisionOrganization } from './compose.ts';
+import { APP_SCHEMA, alignRoleCatalog, provisionOrganization } from './compose.ts';
 import type { Runtime } from './compose.ts';
 import { routeEventsOnce } from './router.ts';
 import type { RouterReport } from './router.ts';
-import { syncIntakeOnce } from './intake.ts';
+import { intakeLinks, syncIntakeOnce } from './intake.ts';
 import type { IntakeReport } from './intake.ts';
 
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.map': 'application/json' };
@@ -43,6 +43,17 @@ export function appRoutes(runtime: Runtime, state: AppState, extra: (runtime: Ru
     { method: 'POST', path: '/v1/provision', handler: async (r) => { requireCapability(r.ctx, 'identity:admin'); return (await provisionOrganization(runtime, r.ctx)) as unknown as Json; } },
     // Run after /v1/provision with a fresh token, repeatedly until `again` is false.
     { method: 'POST', path: '/v1/provision/roles', handler: async (r) => { requireCapability(r.ctx, 'identity:admin'); return { again: await alignRoleCatalog(runtime, r.ctx) }; } },
+    // Intake cases linked to investigations the caller can see (read-only aggregation for the Intake & cases screen).
+    { method: 'GET', path: '/v1/intake/links', handler: async (r) => {
+      requireCapability(r.ctx, 'investigation:read');
+      const investigation = runtime.maybe('investigation');
+      const configured = intakeLinks(runtime.env).has(r.ctx.tenantId);
+      if (investigation === null) throw new DomainError('unavailable', 'The investigation engine is not running');
+      const visible = new Map(((await investigation.listInvestigations(r.ctx, {})) as { ref: string; id: string; state: string; data: { title: string } }[]).map((i) => [i.ref.split('@')[0], i]));
+      const rows = await runtime.sql.query<{ intake_kind: string; intake_id: string; pam_ref: string; created_at: Date }>(`select intake_kind, intake_id, pam_ref, created_at from ${APP_SCHEMA}.intake_links where tenant_id=$1 order by created_at desc limit 500`, [r.ctx.tenantId]);
+      const links = rows.filter((x) => visible.has(x.pam_ref.split('@')[0])).map((x) => { const inv = visible.get(x.pam_ref.split('@')[0]) as { id: string; state: string; data: { title: string } }; return { intakeKind: x.intake_kind, intakeId: x.intake_id, ref: x.pam_ref, investigationId: inv.id, title: inv.data.title, state: inv.state, linkedAt: x.created_at.toISOString() }; });
+      return { configured, intakeUrl: runtime.env.PAM_INTAKE_PUBLIC_URL ?? null, links } as unknown as Json;
+    } },
     ...extra(runtime),
   ];
 }
