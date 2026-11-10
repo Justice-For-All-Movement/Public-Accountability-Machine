@@ -4,9 +4,14 @@
 import test, { after } from 'node:test';
 import { createServer } from 'node:http';
 import assert from 'node:assert/strict';
-import { REQUIRED, skipReason, withStack } from './harness.ts';
+import { REQUIRED, skipReason, withStack, ADMIN_URL } from './harness.ts';
+import { MALWARE_MARKER, intakeSkip, startIntake } from './intake-app.ts';
+import { intakeRef } from '../../src/app/intake.ts';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join as pathJoin } from 'node:path';
 
-const skip = skipReason([...REQUIRED, 'discovery']);
+const skip = skipReason([...REQUIRED, 'discovery']) || (ADMIN_URL === '' ? false : intakeSkip());
 // Controlled retrieval source: a local HTTP server standing in for a public records site (fictional content).
 const pages: Record<string, { type: string; body: string; status?: number }> = {
   '/records/': { type: 'text/html', body: '<html><head><title>Riverside Council records</title></head><body><h1>Published records</h1><ul><li><a href="/records/invoice-0312.txt">Invoice 0312</a></li><li><a href="/records/missing.txt">Withdrawn record</a></li></ul><a rel="next" href="/records/page2">next</a></body></html>' },
@@ -19,13 +24,78 @@ const source = createServer((req, res) => { const page = pages[req.url ?? '']; i
 await new Promise<void>((ok) => source.listen(0, '127.0.0.1', ok));
 const sourcePort = (source.address() as { port: number }).port;
 after(() => { source.close(); });
-test('A: evidence is preserved, processed, linked to claims and investigated; a second organization sees nothing', { skip, timeout: 600_000 }, () => withStack(async (stack) => {
+test('A: pseudonymous intake → quarantine → preserved originals → processing → acquisition → claims → investigation → findings, chronology, evidence index, legal-support draft; second organization sees nothing', { skip, timeout: 600_000 }, () => withStack(async (stack) => {
   const { runtime } = stack;
   const evidence = runtime.get('evidence'), processing = runtime.get('processing'), knowledge = runtime.get('knowledge'), investigation = runtime.get('investigation');
   const orgA = await stack.createOrg('Riverside Relief Watch'); const orgB = await stack.createOrg('Harbour Records Project');
   const investigator = await stack.addUser(orgA, 'Ines Investigator', ['investigator']);
   const reviewer = await stack.addUser(orgA, 'Rafi Reviewer', ['reviewer']);
   const research = await orgA.as(investigator, 'research');
+
+  // 0. Intake (E02, the real application): a pseudonymous report saved as a draft, resumed, submitted with uploads;
+  //    one upload is clean and one carries a test malware signature. The participant recovers their session later.
+  const intake = await startIntake(ADMIN_URL);
+  try {
+    stack.env.PAM_INTAKE_LINKS = JSON.stringify({ [orgA.tenantId]: { baseUrl: intake.apiBase, token: intake.token } });
+    const { chromium } = (await import('node:module')).createRequire(import.meta.url)('playwright') as { chromium: any };
+    const browser = await chromium.launch();
+    const files = await mkdtemp(pathJoin(tmpdir(), 'pam-a-files-'));
+    const statement = 'Ledger photo notes: on 9 March a second transfer of 4,200 went to Riverside Supplies. I was told nobody signed it.\n';
+    await writeFile(pathJoin(files, 'my-notes.txt'), statement); await writeFile(pathJoin(files, 'other.txt'), `prefix ${MALWARE_MARKER} suffix`);
+    const narrative = 'The relief fund paid Riverside Supplies twice in March. I think the second payment was never approved.';
+    const form = await browser.newPage();
+    await form.goto(`${intake.origin}/intake/${intake.slug}/report`);
+    await form.selectOption('#field-participation', 'pseudonymous'); await form.fill('#field-preferred_name', 'Heron'); await form.fill('#field-narrative', narrative);
+    await form.click('button[name="__intent"][value="save_draft"]'); await form.waitForSelector('[data-testid="resume-code"]');
+    const resumeCode = (await form.textContent('[data-testid="resume-code"]'))!.trim(); await form.close();
+    const resumed = await browser.newPage();
+    await resumed.goto(`${intake.origin}/intake/${intake.slug}/report`);
+    await resumed.click('details.draft-resume summary'); await resumed.fill('#resume-code', resumeCode); await resumed.click('details.draft-resume button[type="submit"]');
+    await resumed.waitForFunction((t: string) => (document.querySelector('#field-narrative') as HTMLTextAreaElement)?.value === t, narrative);
+    await resumed.fill('#field-preferred_name', 'Heron');
+    await resumed.setInputFiles('input[name="supporting_files"]', [pathJoin(files, 'my-notes.txt'), pathJoin(files, 'other.txt')]);
+    await resumed.click('button[data-testid="submit-report"]'); await resumed.waitForSelector('[data-testid="access-secret"]');
+    const trackingCode = (await resumed.textContent('[data-testid="tracking-code"]'))!.trim(); const accessSecret = (await resumed.textContent('[data-testid="access-secret"]'))!.trim();
+    await resumed.close();
+    // Participant recovery in a fresh browser context: tracking code + access secret.
+    const portalCtx = await browser.newContext(); const portal = await portalCtx.newPage();
+    await portal.goto(`${intake.origin}/participant/${intake.slug}`);
+    await portal.fill('input[name="trackingCode"]', trackingCode); await portal.fill('input[name="accessSecret"]', accessSecret); await portal.click('button[type="submit"]');
+    await portal.waitForURL(/\/portal/); assert.ok((await portal.content()).includes(trackingCode), 'participant recovered their session');
+    await portalCtx.close(); await browser.close();
+
+    const submissions = await intake.api(intake.token, 'GET', '/submissions');
+    const submission = submissions.body.data.find((x: any) => x.confirmationCode === trackingCode);
+    assert.ok(submission, 'submission visible to the linked service credential');
+    // The bridge preserves a copy of the original account and the released upload; the infected upload stays out.
+    let accountRef: string | null = null, uploadRef: string | null = null;
+    await stack.settle(async () => {
+      accountRef = await intakeRef(runtime, orgA.tenantId, 'submission', submission.id);
+      const atts = (await intake.api(intake.token, 'GET', `/submissions/${submission.id}/attachments`)).body.data as any[];
+      const clean = atts.find((x) => x.released); if (clean) uploadRef = await intakeRef(runtime, orgA.tenantId, 'document_version', clean.versionId);
+      return accountRef !== null && uploadRef !== null && atts.some((x) => x.contentStatus === 'blocked');
+    }, 180_000);
+    const atts = (await intake.api(intake.token, 'GET', `/submissions/${submission.id}/attachments`)).body.data as any[];
+    const blocked = atts.find((x) => x.contentStatus === 'blocked');
+    assert.equal(await intakeRef(runtime, orgA.tenantId, 'document_version', blocked.versionId), null, 'a blocked upload never enters PAM');
+    await stack.settle(async () => (await evidence.describe(research, accountRef!))?.available === true && (await evidence.describe(research, uploadRef!))?.available === true);
+    const accountCopy = new TextDecoder().decode(await evidence.getBytes(research, accountRef!));
+    assert.match(accountCopy, /never approved/); assert.doesNotMatch(accountCopy, /Heron/, 'protected identity is not copied');
+    assert.match(accountCopy, /"consistent": true/, 'the intake digest was re-verified');
+    assert.equal(new TextDecoder().decode(await evidence.getBytes(research, uploadRef!)), statement, 'released upload preserved byte-for-byte');
+    const uploadProv = JSON.stringify(await evidence.provenance(research, uploadRef!));
+    assert.match(uploadProv, /intake_attachment/); assert.match(uploadProv, /public_upload_quarantined/, 'intake custody history is carried over');
+    // Opening a case in intake starts an investigation in PAM whose original account is the preserved copy.
+    const opened = await intake.api(intake.token, 'POST', '/cases', { submissionId: submission.id });
+    assert.ok([200, 201].includes(opened.status), JSON.stringify(opened.body));
+    const caseId = opened.body.data.case?.id ?? opened.body.data.id;
+    let intakeInvRef: string | null = null;
+    await stack.settle(async () => (intakeInvRef = await intakeRef(runtime, orgA.tenantId, 'case', caseId)) !== null, 60_000);
+    const intakeInv = await investigation.get(research, 'investigation', intakeInvRef!.split(':')[2]!.split('@')[0]!);
+    assert.match(JSON.stringify(intakeInv), new RegExp(accountRef!.split('@')[0]!), 'investigation cites the preserved account');
+    console.log('intake', trackingCode, accountRef, uploadRef, intakeInvRef);
+    (globalThis as any).__intake = { accountRef, uploadRef, intakeInvRef, intakeInvId: intakeInv.id };
+  } finally { await intake.close(); }
 
   // 1. Preserve originals (fictional fixtures).
   const ledger = 'Riverside Flood Relief Fund - ledger extract\n3 March: transfer of 4,200 to Riverside Supplies Ltd, approved by treasurer M. Okafor.\n9 March: transfer of 4,200 to Riverside Supplies Ltd, no approval recorded.\n';
@@ -71,7 +141,7 @@ test('A: evidence is preserved, processed, linked to claims and investigated; a 
   console.log('claims', paid.ref, unauthorised.ref);
 
   // 4. Investigation: questions, competing explanations, attempts, a reviewed finding, a package with exact sources.
-  const inv = await investigation.openInvestigation(research, { title: 'Riverside relief fund payments', originRef: 'E00:objective:acceptance-a', scopeStatement: 'Whether relief fund money was paid out without authorisation in March.', originalAccount: { summary: 'A resident reported that the fund paid the same supplier twice.', label: 'allegation' }, idempotencyKey: 'inv' });
+  const inv = await investigation.get(research, 'investigation', (globalThis as any).__intake.intakeInvId);
   const q1 = await investigation.addQuestion(research, inv.id, { text: 'Were two payments made to the same supplier?', material: true, whyMaterial: 'Core of the account', claimRefs: [paid.ref] });
   const q2 = await investigation.addQuestion(research, inv.id, { text: 'Who authorised the second payment?', material: true, whyMaterial: 'Determines whether it was unauthorised', claimRefs: [unauthorised.ref] });
   await investigation.addHypothesis(research, q2.id, { explanation: 'The second transfer was an unauthorised duplicate.', predictedObservations: ['No approval record exists'] });
@@ -143,7 +213,7 @@ test('A: evidence is preserved, processed, linked to claims and investigated; a 
   // organization B's owner holds every read capability there (purpose 'workspace' reads across all engines)
   const ownerB = { ...(await orgB.as(orgB.owner, 'research')), capabilities: [...new Set([...(await orgB.as(orgB.owner, 'research')).capabilities, ...(await orgB.as(orgB.owner, 'workspace')).capabilities])] };
   for (const [name, engine] of [['evidence', evidence], ['processing', processing], ['knowledge', knowledge], ['investigation', investigation], ['release', release]] as const) {
-    for (const ref of [a.ref, rep.ref, paid.ref, inv.ref, pkg.ref, draft.ref]) assert.equal(await engine.inspect(ownerB, ref), null, `${name}.inspect leaks ${ref}`);
+    for (const ref of [a.ref, rep.ref, paid.ref, inv.ref, pkg.ref, draft.ref, (globalThis as any).__intake.accountRef, (globalThis as any).__intake.uploadRef]) assert.equal(await engine.inspect(ownerB, ref), null, `${name}.inspect leaks ${ref}`);
     assert.deepEqual(await engine.search(ownerB, { q: 'Riverside' }), [], `${name}.search leaks`);
     assert.deepEqual(await engine.audit({ ...ownerB, capabilities: [...ownerB.capabilities, `${name}:audit`] }, {}), [], `${name}.audit leaks`);
   }

@@ -27,7 +27,7 @@ export type Person = { login: string; password: string; actorId: string; refresh
 export type Org = { tenantId: string; projectId: string; owner: Person; as(person: Person, purpose: string): Promise<ServiceContext>;
   /** Context for a durable agent identity: a short-lived token carrying exactly the listed capabilities, or a refusal. */
   asAgent(agentId: string, purpose: string, capabilities: string[]): Promise<ServiceContext> };
-export type Stack = { runtime: Runtime; state: AppState; dataDir: string; url: string;
+export type Stack = { runtime: Runtime; state: AppState; dataDir: string; url: string; env: Record<string, string>;
   createOrg(name: string): Promise<Org>;
   addUser(org: Org, name: string, roles: string[]): Promise<Person>;
   /** Runs worker passes (orchestration tasks, engine jobs, event router) until `done` returns true or the deadline passes. */
@@ -37,7 +37,7 @@ export type Stack = { runtime: Runtime; state: AppState; dataDir: string; url: s
 export async function withStack(fn: (stack: Stack) => Promise<void>, extraEnv: Record<string, string> = {}): Promise<void> {
   await withDisposableDatabase(pg, ADMIN_URL, async (url) => {
     const dataDir = await mkdtemp(join(tmpdir(), 'pam-acceptance-'));
-    const env = { DATABASE_URL: url, PAM_DATA_DIR: dataDir, PAM_ENGINES_DIR: new URL('../../engines', import.meta.url).pathname,
+    const env: Record<string, string> = { DATABASE_URL: url, PAM_DATA_DIR: dataDir, PAM_ENGINES_DIR: new URL('../../engines', import.meta.url).pathname,
       IDENTITY_KEY_ENCRYPTION_KEY: randomBytes(32).toString('base64'), EVIDENCE_MASTER_KEY: randomBytes(32).toString('base64'),
       // No antivirus signature database is reachable in this environment; the documented explicit policy is used and recorded on every item.
       EVIDENCE_SCAN_POLICY: 'structural_only',
@@ -55,7 +55,7 @@ export async function withStack(fn: (stack: Stack) => Promise<void>, extraEnv: R
     };
     let platformAdmin: { person: Person; tenantId: string; projectId: string } | null = null;
     const stack: Stack = {
-      runtime, state, dataDir, url,
+      runtime, state, dataDir, url, env,
       async createOrg(name) {
         const login = `owner-${randomBytes(3).toString('hex')}@example.org`; const pw = password();
         let tenantId: string, projectId: string, actorId: string;

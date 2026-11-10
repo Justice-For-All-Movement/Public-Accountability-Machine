@@ -15,11 +15,13 @@ import { alignRoleCatalog, provisionOrganization } from './compose.ts';
 import type { Runtime } from './compose.ts';
 import { routeEventsOnce } from './router.ts';
 import type { RouterReport } from './router.ts';
+import { syncIntakeOnce } from './intake.ts';
+import type { IntakeReport } from './intake.ts';
 
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.map': 'application/json' };
 const SECURITY_HEADERS = { 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer', 'content-security-policy': "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" };
 
-export type AppState = { lastRouter: RouterReport | null; lastWorkerError: string | null; workerPasses: number; startedAt: string };
+export type AppState = { lastIntake?: IntakeReport; lastRouter: RouterReport | null; lastWorkerError: string | null; workerPasses: number; startedAt: string };
 
 export function appRoutes(runtime: Runtime, state: AppState, extra: (runtime: Runtime) => Route[] = () => []): Route[] {
   return [
@@ -34,7 +36,7 @@ export function appRoutes(runtime: Runtime, state: AppState, extra: (runtime: Ru
     { method: 'GET', path: '/v1/health', handler: async (r) => {
       requireCapability(r.ctx, 'orchestration:read');
       const engines = await Promise.all([...runtime.engines.values()].map(async (e) => ({ id: e.id, short: e.short, available: e.available, error: e.error, health: e.engine === null ? null : await e.engine.health().catch((error: unknown) => ({ ok: false, detail: { error: String(error) } })) })));
-      return { orchestration: await runtime.orchestration.health(), engines, worker: { passes: state.workerPasses, lastError: state.lastWorkerError, lastRouter: state.lastRouter } } as unknown as Json;
+      return { orchestration: await runtime.orchestration.health(), engines, worker: { passes: state.workerPasses, lastError: state.lastWorkerError, lastRouter: state.lastRouter, lastIntake: state.lastIntake ?? null } } as unknown as Json;
     } },
     // Creates PAM's own service identity in the caller's organization so workers and the event router can act there.
     { method: 'POST', path: '/v1/provision', handler: async (r) => { requireCapability(r.ctx, 'identity:admin'); return (await provisionOrganization(runtime, r.ctx)) as unknown as Json; } },
@@ -48,6 +50,8 @@ export async function workerPass(runtime: Runtime, state: AppState, worker: stri
   try {
     await runtime.orchestration.workOnce({ worker });
     for (const entry of runtime.engines.values()) if (entry.runJobs !== null) await entry.runJobs();
+    const intake = await syncIntakeOnce(runtime);
+    state.lastIntake = intake;
     state.lastRouter = await routeEventsOnce(runtime);
     state.lastWorkerError = null;
   } catch (error) { state.lastWorkerError = error instanceof Error ? error.message : String(error); }

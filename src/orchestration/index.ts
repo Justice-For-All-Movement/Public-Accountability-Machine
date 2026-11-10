@@ -585,6 +585,11 @@ export function createEngine(deps: OrchestrationDeps) {
       await sql.query(`insert into ${S}.router_cursors (engine, last_id) values ($1,$2) on conflict (engine) do update set last_id=excluded.last_id, updated_at=now() where ${S}.router_cursors.last_id::bigint < excluded.last_id::bigint`, [engineId, lastId]);
     },
 
+    /** Opaque cursors (e.g. an external feed's position): replaced unconditionally. */
+    async routerCursorSet(key: string, value: string): Promise<void> {
+      await sql.query(`insert into ${S}.router_cursors (engine, last_id) values ($1,$2) on conflict (engine) do update set last_id=excluded.last_id, updated_at=now()`, [key, value]);
+    },
+
     // ── Standard surface ──
     async inspect(ctx: ServiceContext, ref: string): Promise<Inspection | null> {
       requireCapability(ctx, 'orchestration:read');
