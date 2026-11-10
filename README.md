@@ -15,6 +15,26 @@ what works, what has been tested and what remains. Nothing here is deployed, and
 - `docs/ENGINE_SERVICE_CONVENTION.md` — the convention all engines follow.
 - The original fifteen-engine design, 122-task backlog and requirements, retained byte-for-byte under `docs/approved-design/`.
 
+## Using the application
+
+`npm start` serves the browser application at `http://127.0.0.1:8080` (plain ES modules and CSS in `web/`, no build
+step; the workspace component library is served from `engines/workspace/web/`). Sign in with an account created by
+`npm run bootstrap-admin` or by an administrator, then choose the organization and project at the top of the page.
+
+- Each screen obtains an access token for exactly one purpose (shown under the screen title) and re-issues it when it
+  expires. The refresh token lives in memory and `sessionStorage` only; **Sign out** ends the session on the server.
+- Any universal reference (`E05:evidence_version:…`) is a link that opens the inspector drawer: linked sources and
+  dependents (graph, table or text), the object's details and the controls your role may use there.
+- Screens: Overview, Objectives & agents, Intake & cases, Evidence, Investigations, Knowledge, Correspondence,
+  Editorial, Production, Rights, Release, Discovery, Resources, Audit, Administration, plus global search.
+- A screen whose engine is not running shows **Disconnected**; one your role or purpose does not allow shows
+  **Not found or not permitted**. Nothing is shown as done, sent or available before the engine says so.
+- Intake is a separate application: set `PAM_INTAKE_PUBLIC_URL` to link its staff UI and participant form.
+- First run for a new organization: **Administration → Run provisioning**.
+
+Browser tests: `TEST_DATABASE_URL=… npm run test:browser` (real PostgreSQL, engines from `./engines`, pre-installed
+Playwright Chromium; axe-core from the workspace engine).
+
 ## Check
 
 ```sh

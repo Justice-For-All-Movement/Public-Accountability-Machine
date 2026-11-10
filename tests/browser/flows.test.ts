@@ -25,7 +25,7 @@ test('sign-in, organization/project selection, evidence upload â†’ quarantined â
     assert.equal(await page.evaluate(() => localStorage.length), 0, 'nothing is kept in localStorage');
     assert.ok(await page.evaluate(() => sessionStorage.getItem('pam.session') !== null), 'the refresh token is kept in sessionStorage only');
     const options = await page.locator('#pam-scope option').allInnerTexts();
-    assert.ok(options.some((o) => o.includes('Second project')), `both projects listed: ${options.join(' | ')}`);
+    assert.ok(options.some((o: string) => o.includes('Second project')), `both projects listed: ${options.join(' | ')}`);
 
     await page.goto(`${app.url}/evidence`);
     await settled(page);
@@ -49,7 +49,8 @@ test('sign-in, organization/project selection, evidence upload â†’ quarantined â
     await done.waitFor();
     const derivative = /(E05:evidence_version:[^\s.]+)/.exec(await done.innerText())?.[1] as string;
     const original = await page.locator('dd button.pam-ref').first().getAttribute('data-ref');
-    await page.evaluate(async (ref: string) => { (await import('/js/ui.js')).openInspector(ref); }, derivative);
+    // The derivative is named in the result text; open it the way any reference link does.
+    await page.evaluate(`import('/js/ui.js').then((m) => m.openInspector(${JSON.stringify(derivative)}))`);
     await page.locator('#pam-inspector:not([hidden])').waitFor();
     await page.locator('#pam-inspector .ws-inspector').waitFor();
     await page.locator('#pam-inspector [role="tab"]', { hasText: 'Sources' }).click();
@@ -158,7 +159,7 @@ test('permission denied (403) for a user without the purpose; keyboard-only navi
     assert.ok(await tabTo(page, 'select[name="claimType"]'));
     assert.ok(await tabTo(page, 'form:has(textarea[name="text"]) button[type="submit"]'));
     await page.keyboard.press('Enter');
-    await page.locator('.pam-form-status', { hasText: 'Claim created (unassessed).' }).waitFor({ timeout: 10_000 }).catch(async (e) => { throw new Error(`${e.message}\n${await page.locator('form').first().innerText()}`); });
+    await page.locator('.pam-form-status', { hasText: 'Claim created (unassessed).' }).waitFor({ timeout: 10_000 }).catch(async (e: Error) => { throw new Error(`${e.message}\n${await page.locator('form').first().innerText()}`); });
     await page.getByRole('link', { name: 'The fictional board met on 3 March.' }).waitFor();
   });
 });
