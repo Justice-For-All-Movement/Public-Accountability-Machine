@@ -68,12 +68,16 @@ export async function startServer(runtime: Runtime, options: StartOptions = {}):
   handlers.set('orchestration', createHttpHandler({ name: 'orchestration', version: runtime.orchestration.manifest.version, routes: orchestrationRoutes(runtime.orchestration), verify: runtime.verify, onError }));
   const app = createHttpHandler({ name: 'pam', version: '0.1.0', routes: appRoutes(runtime, state, options.extraRoutes), verify: runtime.verify, onError });
   const webDir = resolve(options.webDir ?? './web');
+  // Browser component library of the workspace engine (E14), served read-only from its installed copy.
+  const workspaceWebDir = resolve(runtime.env.PAM_ENGINES_DIR ?? './engines', 'workspace', 'web');
 
   const serveStatic = async (req: IncomingMessage, res: ServerResponse, pathname: string): Promise<void> => {
-    let rel = normalize(decodeURIComponent(pathname)).replace(/^([/\\])+/, '');
-    if (rel === '' || !extname(rel)) rel = 'index.html'; // client-side routes fall back to the application shell
-    const full = join(webDir, rel);
-    if (!full.startsWith(webDir + sep)) { res.writeHead(404).end(); return; }
+    let base = webDir; let path = pathname;
+    if (pathname.startsWith('/engines/workspace/web/')) { base = workspaceWebDir; path = pathname.slice('/engines/workspace/web'.length); }
+    let rel = normalize(decodeURIComponent(path)).replace(/^([/\\])+/, '');
+    if (rel === '' || !extname(rel)) { if (base !== webDir) { res.writeHead(404).end(); return; } rel = 'index.html'; } // client-side routes fall back to the application shell
+    const full = join(base, rel);
+    if (!full.startsWith(base + sep)) { res.writeHead(404).end(); return; }
     try {
       const st = await stat(full);
       if (!st.isFile()) throw new Error('not a file');

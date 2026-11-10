@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import pg from 'pg';
 import { DomainError } from '../contracts.ts';
-import type { Scope } from '../contracts.ts';
+import type { Json, Scope } from '../contracts.ts';
 import { FsObjectStore, S3ObjectStore, pgSql } from '../service-kit.ts';
 import type { AuthorizationPort, BudgetPort, EvidencePort, ObjectStore, Route, ServiceContext, Sql, StandardEngine, TokenVerifier, UseDecisionPort } from '../service-kit.ts';
 import * as orchestrationModule from '../orchestration/index.ts';
@@ -89,6 +89,7 @@ export async function compose(env: Env, options: { actions?: (runtime: Runtime) 
   if (doMigrate) { await migrateApp(sql); await orchestrationModule.migrate(sql); await sql.query(`create table if not exists ${APP_SCHEMA}.intake_links (tenant_id text not null, intake_kind text not null, intake_id text not null, pam_ref text not null, created_at timestamptz not null default now(), primary key (tenant_id, intake_kind, intake_id))`); }
 
   const maybe = (short: string): AnyEngine | null => entries.get(short)?.engine ?? null;
+  const runtimeRef: { current: Runtime | null } = { current: null };
   const serviceContextRef: { fn: (scope: Scope, purpose?: string) => Promise<ServiceContext> } = { fn: async () => { throw new DomainError('unavailable', 'Service identity is not ready'); } };
   // Ports are resolved lazily so engines can be constructed in any order and absent engines fail closed at call time.
   const port = <T extends object>(short: string, describe: string): T => new Proxy({}, {
@@ -147,6 +148,15 @@ export async function compose(env: Env, options: { actions?: (runtime: Runtime) 
   factories.correspondence = (m) => m.createEngine({ sql, objects: objectsFor(env, 'correspondence'), ports: { authorization, budget, evidence, useDecision: useDecisions },
     config: { ...(env.CORRESPONDENCE_SECRET_KEY ? { secretKey: env.CORRESPONDENCE_SECRET_KEY } : {}), provider: { allowPrivateHosts: env.CORRESPONDENCE_ALLOW_PRIVATE_HOSTS === '1', allowInsecureTls: env.CORRESPONDENCE_ALLOW_INSECURE_TLS === '1' }, ...(env.CORRESPONDENCE_RECONCILE_DELAY_MS ? { reconcileDelayMs: Number(env.CORRESPONDENCE_RECONCILE_DELAY_MS) } : {}) } });
   factories.editorial = (m) => m.createEngine({ sql, objects: objectsFor(env, 'editorial'), ports: { knowledge: adapters.editorialKnowledgePort(need), useDecisions, authorization } });
+  // E14 aggregates the other engines through their standard surfaces, always with the CALLER's context.
+  const ENGINE_IDS: Record<string, string> = Object.fromEntries(ENGINE_ORDER.map(([id, short]) => [id, short]));
+  const engineMap = new Proxy({} as Record<string, unknown>, {
+    ownKeys: () => ['E00', ...ENGINE_ORDER.map(([id]) => id).filter((id) => id !== 'E14' && maybe(ENGINE_IDS[id] as string) !== null)],
+    getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }),
+    get: (_t, id) => (id === 'E00' ? runtimeRef.current?.orchestration : typeof id === 'string' && ENGINE_IDS[id] !== undefined ? maybe(ENGINE_IDS[id] as string) ?? undefined : undefined),
+    has: (_t, id) => id === 'E00' || (typeof id === 'string' && ENGINE_IDS[id] !== undefined && maybe(ENGINE_IDS[id] as string) !== null),
+  });
+  factories.workspace = (m) => m.createEngine({ sql, ports: { engines: engineMap, controls: { E00: orchestrationControls(() => runtimeRef.current) } } });
   factories.release = (m) => {
     // Jurisdiction packs are deployment data: every *.json file in PAM_JURISDICTION_PACKS_DIR.
     const dir = env.PAM_JURISDICTION_PACKS_DIR; const packs = dir && existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8'))) : [];
@@ -192,7 +202,6 @@ export async function compose(env: Env, options: { actions?: (runtime: Runtime) 
   };
 
   serviceContextRef.fn = serviceContext;
-  const runtimeRef: { current: Runtime | null } = { current: null };
   const orchestration = orchestrationModule.createEngine({
     sql,
     ports: {
@@ -265,4 +274,44 @@ export async function alignRoleCatalog(runtime: Runtime, ctx: ServiceContext): P
     return true;
   }
   return false;
+}
+
+/** Operator controls on orchestration objects, offered through the workspace. Each control re-checks the caller's own capability in E00. */
+export function orchestrationControls(current: () => Runtime | null) {
+  const taskControls = [
+    { id: 'pause', label: 'Pause', capability: 'orchestration:control', dangerous: false, input: { type: 'object', properties: { reason: { type: 'string' } } } },
+    { id: 'resume', label: 'Resume', capability: 'orchestration:control', dangerous: false, input: { type: 'object', properties: {} } },
+    { id: 'cancel', label: 'Cancel', capability: 'orchestration:control', dangerous: true, input: { type: 'object', properties: { reason: { type: 'string' } } } },
+    { id: 'retry', label: 'Retry', capability: 'orchestration:control', dangerous: false, input: { type: 'object', properties: {} } },
+    { id: 'reassign', label: 'Reassign', capability: 'orchestration:control', dangerous: false, input: { type: 'object', required: ['agentId'], properties: { agentId: { type: 'string', description: 'Agent id, or empty to unassign' } } } },
+    { id: 'approve', label: 'Approve', capability: 'orchestration:approve', dangerous: false, input: { type: 'object', properties: { reason: { type: 'string' } } } },
+    { id: 'reject', label: 'Reject', capability: 'orchestration:approve', dangerous: true, input: { type: 'object', properties: { reason: { type: 'string' } } } },
+  ];
+  const objectiveControls = [
+    { id: 'objective_pause', label: 'Pause objective', capability: 'orchestration:control', dangerous: false, input: { type: 'object', properties: { reason: { type: 'string' } } } },
+    { id: 'objective_resume', label: 'Resume objective', capability: 'orchestration:control', dangerous: false, input: { type: 'object', properties: {} } },
+    { id: 'objective_cancel', label: 'Cancel objective', capability: 'orchestration:control', dangerous: true, input: { type: 'object', properties: { reason: { type: 'string' } } } },
+  ];
+  const kindOf = (ref: string): string => ref.split(':')[1] ?? '';
+  const idOf = (ref: string): string => (ref.split(':')[2] ?? '').split('@')[0] ?? '';
+  return {
+    async controlsFor(ctx: ServiceContext, ref: string) {
+      const kind = kindOf(ref);
+      const specs = kind === 'task' ? taskControls : kind === 'objective' ? objectiveControls : [];
+      return specs.filter((c) => ctx.capabilities.includes(c.capability) || ctx.capabilities.includes('orchestration:*') && !['orchestration:approve'].includes(c.capability));
+    },
+    async invoke(ctx: ServiceContext, ref: string, controlId: string, input: Record<string, unknown>) {
+      const rt = current(); if (rt === null) throw new DomainError('unavailable', 'Orchestration is not running');
+      const o = rt.orchestration; const id = idOf(ref); const reason = typeof input?.reason === 'string' ? input.reason : '';
+      switch (controlId) {
+        case 'pause': case 'resume': case 'cancel': case 'retry': return o.controlTask(ctx, id, controlId, reason) as unknown as Json;
+        case 'reassign': return o.reassignTask(ctx, id, typeof input?.agentId === 'string' && input.agentId !== '' ? input.agentId : null) as unknown as Json;
+        case 'approve': case 'reject': return o.decideTask(ctx, id, controlId, reason) as unknown as Json;
+        case 'objective_pause': return o.setObjectiveStatus(ctx, id, 'paused', reason) as unknown as Json;
+        case 'objective_resume': return o.setObjectiveStatus(ctx, id, 'active', reason) as unknown as Json;
+        case 'objective_cancel': return o.setObjectiveStatus(ctx, id, 'cancelled', reason) as unknown as Json;
+        default: throw new DomainError('not_found', 'Unknown control');
+      }
+    },
+  };
 }
