@@ -20,7 +20,8 @@
     "bootstrap-admin": "node src/app/main.ts bootstrap-admin",
     "start": "node src/app/main.ts serve",
     "worker": "node src/app/main.ts worker",
-    "test:acceptance": "node --test --test-concurrency=1 tests/acceptance/*.test.ts"
+    "test:acceptance": "node --test --test-concurrency=1 tests/acceptance/*.test.ts",
+    "test:browser": "node --test --test-concurrency=1 tests/browser/*.test.ts"
   },
   "dependencies": {
     "pg": "8.23.1"

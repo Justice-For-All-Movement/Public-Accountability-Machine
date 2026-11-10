@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Public Accountability Machine</title>
+  <link rel="stylesheet" href="/engines/workspace/web/workspace.css">
+  <link rel="stylesheet" href="/app.css">
+  <link rel="icon" href="data:,">
+  <script type="module" src="/js/main.js"></script>
+</head>
+<body>
+  <a class="pam-skip" href="#main">Skip to main content</a>
+  <header class="pam-header" id="pam-header">
+    <div class="pam-brand">
+      <img id="pam-logo" alt="" hidden>
+      <p class="pam-brand__name"><a href="/" id="pam-org-name" data-nav>Public Accountability Machine</a></p>
+    </div>
+    <div class="pam-header__tools" id="pam-tools" hidden>
+      <div class="pam-switcher">
+        <label for="pam-scope">Organization and project</label>
+        <select id="pam-scope"></select>
+      </div>
+      <form class="pam-search" id="pam-search" role="search">
+        <label for="pam-search-q" class="ws-visually-hidden">Search all engines</label>
+        <input id="pam-search-q" name="q" type="search" placeholder="Search all engines" autocomplete="off">
+        <button type="submit" class="ws-button">Search</button>
+      </form>
+      <button type="button" class="ws-button" id="pam-signout">Sign out</button>
+    </div>
+  </header>
+  <div class="pam-layout">
+    <nav class="pam-nav" id="pam-nav" aria-label="Main" hidden>
+      <button type="button" class="ws-button pam-nav__toggle" id="pam-nav-toggle" aria-expanded="false" aria-controls="pam-nav-list">Menu</button>
+      <ul id="pam-nav-list"></ul>
+    </nav>
+    <main id="main" class="pam-main" tabindex="-1"></main>
+    <aside class="pam-inspector" id="pam-inspector" aria-labelledby="pam-inspector-title" hidden>
+      <div class="pam-inspector__head">
+        <h2 id="pam-inspector-title" tabindex="-1">Inspector</h2>
+        <button type="button" class="ws-button" id="pam-inspector-close">Close inspector</button>
+      </div>
+      <div id="pam-inspector-body"></div>
+    </aside>
+  </div>
+  <div id="pam-status" class="ws-visually-hidden" role="status" aria-live="polite"></div>
+  <div id="pam-alert" class="ws-visually-hidden" role="alert" aria-live="assertive"></div>
+</body>
+</html>

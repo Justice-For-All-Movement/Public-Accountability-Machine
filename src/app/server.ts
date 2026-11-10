@@ -28,7 +28,8 @@ export function appRoutes(runtime: Runtime, state: AppState, extra: (runtime: Ru
     // Public: which engines are running. Names and availability only; no data.
     { method: 'GET', path: '/v1/status', public: true, handler: async () => {
       const identity = runtime.maybe('identity');
-      return { name: 'Public Accountability Machine', startedAt: state.startedAt,
+      // intakeUrl: public address of the separate intake application (staff UI and participant form), if configured.
+      return { name: 'Public Accountability Machine', startedAt: state.startedAt, intakeUrl: runtime.env.PAM_INTAKE_PUBLIC_URL ?? null,
         bootstrapped: identity === null ? null : await identity.isBootstrapped(),
         engines: [{ id: 'E00', short: 'orchestration', available: true, error: null }, ...[...runtime.engines.values()].map((e) => ({ id: e.id, short: e.short, available: e.available, error: e.available ? null : 'unavailable' }))] } as unknown as Json;
     } },
