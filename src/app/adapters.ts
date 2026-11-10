@@ -94,10 +94,14 @@ export function investigationKnowledgePort(get: Get) {
       const entries = (Array.isArray(out) ? out : (out.entries ?? [])) as any[]; // eslint-disable-line @typescript-eslint/no-explicit-any
       const ids = new Set(claimIds(input.claimRefs));
       return entries.flatMap((e) => {
-        const claims = ((e.claims ?? e.supportingClaims ?? []) as any[]).map((c) => (typeof c === 'string' ? c : (c.ref as string))); // eslint-disable-line @typescript-eslint/no-explicit-any
-        const claimRef = claims.find((c) => ids.size === 0 || ids.has(idOf(c))) ?? claims[0];
-        if (claimRef === undefined) return [];
-        return [{ at: String(e.at ?? e.time?.earliest ?? e.earliest ?? e.label ?? ''), description: String(e.description ?? e.title ?? e.text ?? ''), claimRef, ...(e.status ?? e.label ? { status: String(e.status ?? e.label) } : {}), sources: ((e.sources ?? e.evidence ?? []) as any[]).map((s) => (typeof s === 'string' ? s : String(s.evidenceRef ?? s.ref))) }]; // eslint-disable-line @typescript-eslint/no-explicit-any
+        const claims = ((e.claims ?? []) as any[]); // eslint-disable-line @typescript-eslint/no-explicit-any
+        const claim = claims.find((c) => ids.size === 0 || ids.has(idOf(c.ref as string))) ?? claims[0];
+        if (claim === undefined) return [];
+        const when = String(e.time?.earliest ?? e.time?.latest ?? 'date unknown');
+        const coarse = ['day', 'month', 'year', 'decade'].includes(String(e.time?.precision));
+        const range = e.time?.earliest && e.time?.latest && String(e.time.earliest).slice(0, 10) !== String(e.time.latest).slice(0, 10);
+        return [{ at: range ? `${when.slice(0, 10)} to ${String(e.time.latest).slice(0, 10)}` : coarse ? when.slice(0, 10) : when.slice(0, 20), description: `${String(e.title ?? '')}${e.time?.precision === 'approximate' ? ' (date approximate)' : ''}`, claimRef: claim.ref as string, status: String(e.label ?? 'unknown'),
+          sources: [...new Set(claims.flatMap((c) => [...((c.supporting ?? []) as any[]), ...((c.challenging ?? []) as any[])].map((l) => String(l.evidenceRef))))] }]; // eslint-disable-line @typescript-eslint/no-explicit-any
       });
     },
     async getGraph(ctx: ServiceContext, input: { claimRefs: readonly string[] }) {
@@ -110,4 +114,31 @@ export function investigationKnowledgePort(get: Get) {
       return { dependents: [...impact.claims, ...impact.evidenceLinks, ...impact.statements] };
     },
   };
+}
+
+// ───────────────────────────── E08 package → E12 builders ─────────────────────────────
+type Any = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+const cite = (s: Any, supports: string): { ref: string; locator?: string; supports: string } => ({ ref: String(s.ref), supports, ...(s.selector === undefined || s.selector === null ? {} : { locator: typeof s.selector === 'string' ? s.selector : JSON.stringify(s.selector) }) });
+/**
+ * Converts an investigation package (E08) into the input the release builders (E12) accept. Nothing is added: statuses,
+ * sources and limitations are carried as recorded. A refuted finding is passed as `disputed` with the refutation stated,
+ * because the release vocabulary has no stronger negative status and must not present it as established.
+ */
+export function toReleasePackage(pkg: { ref: string; content: Json }): Json {
+  const c = pkg.content as Any;
+  const open = ((c.questionTree ?? []) as Any[]).filter((q) => q.status === 'open' || q.status === 'in_progress');
+  return {
+    investigationRef: pkg.ref, title: String(c.investigation?.title ?? 'Investigation'), summary: String(c.investigation?.scopeStatement ?? ''),
+    methodology: `Attempts recorded: ${Array.isArray(c.attempts?.entries) ? c.attempts.entries.length : (c.attempts?.total ?? 'see investigation package')}. Source: ${pkg.ref}.`,
+    limitations: (c.limitations ?? []) as string[],
+    findings: ((c.findings ?? []) as Any[]).map((f) => ({ id: String(f.id), ref: String(f.ref), statement: f.classification === 'refuted' ? `Refuted: ${f.statement}` : String(f.statement), status: f.classification === 'established' ? 'established' : f.classification === 'unknown' ? 'unknown' : 'disputed',
+      sources: [...((f.supporting ?? []) as Any[]).map((s) => cite(s, 'supports')), ...((f.contradicting ?? []) as Any[]).map((s) => cite(s, 'contradicts'))],
+      limitations: [...((f.limitations ?? []) as string[]), ...(f.stale === true ? ['This finding is stale after an upstream change and awaits renewed review.'] : [])] })),
+    chronology: ((c.chronology?.entries ?? []) as Any[]).map((e) => ({ date: String(e.at), event: String(e.description), status: e.label === 'established' ? 'established' : e.label === 'disputed' ? 'disputed' : 'unknown', sources: ((e.sources ?? []) as string[]).map((ref) => ({ ref })) })),
+    openQuestions: open.map((q) => ({ id: String(q.id), question: String(q.text) })),
+  } as unknown as Json;
+}
+/** Evidence index entries (E08 package) → evidence bundle items (E12). Originals are never included by this mapping. */
+export function toEvidenceItems(pkg: { content: Json }): Json {
+  return (((pkg.content as Any).evidenceIndex ?? []) as Any[]).filter((e) => typeof e.ref === 'string').map((e) => ({ ref: e.ref as string, label: String(e.filename ?? e.ref), description: `sha256 ${String(e.sha256 ?? 'unknown')}; ${String(e.custodySummary ?? 'custody not reported')}`, basis: e.available === false ? 'original unavailable (provenance gap)' : 'preserved original' })) as unknown as Json;
 }

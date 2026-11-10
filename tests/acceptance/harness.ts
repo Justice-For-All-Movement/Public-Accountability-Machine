@@ -16,7 +16,7 @@ import type { AppState } from '../../src/app/server.ts';
 import { loadActions } from '../../src/app/registry.ts';
 
 export const ADMIN_URL = process.env.TEST_DATABASE_URL ?? '';
-export const REQUIRED = ['identity', 'consent', 'resources', 'evidence', 'processing', 'knowledge', 'investigation'];
+export const REQUIRED = ['identity', 'consent', 'resources', 'evidence', 'processing', 'knowledge', 'investigation', 'release'];
 export function skipReason(required: readonly string[] = REQUIRED): string | false {
   if (ADMIN_URL === '') return 'TEST_DATABASE_URL is not set; acceptance test not executed';
   const missing = required.filter((s) => !existsSync(new URL(`../../engines/${s}/src/engine/index.ts`, import.meta.url)));
@@ -38,7 +38,9 @@ export async function withStack(fn: (stack: Stack) => Promise<void>, extraEnv: R
     const env = { DATABASE_URL: url, PAM_DATA_DIR: dataDir, PAM_ENGINES_DIR: new URL('../../engines', import.meta.url).pathname,
       IDENTITY_KEY_ENCRYPTION_KEY: randomBytes(32).toString('base64'), EVIDENCE_MASTER_KEY: randomBytes(32).toString('base64'),
       // No antivirus signature database is reachable in this environment; the documented explicit policy is used and recorded on every item.
-      EVIDENCE_SCAN_POLICY: 'structural_only', ...extraEnv };
+      EVIDENCE_SCAN_POLICY: 'structural_only',
+      // Fictional example jurisdiction pack shipped with the release engine; real packs are private deployment data.
+      PAM_JURISDICTION_PACKS_DIR: new URL('../../engines/release/examples/jurisdiction-packs', import.meta.url).pathname, ...extraEnv };
     const runtime = await compose(env, { actions: loadActions });
     const state: AppState = { lastRouter: null, lastWorkerError: null, workerPasses: 0, startedAt: new Date().toISOString() };
     const identity = runtime.get('identity');

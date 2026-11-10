@@ -1,7 +1,7 @@
 // Composes the engines into one runtime. Each engine keeps its own schema and is reached only through its service
 // interface (`createEngine` / `routes`). Engines are loaded from ./engines/<short> (see scripts/bootstrap-engines.mjs);
 // an engine that is absent or fails to start is reported as unavailable and everything else keeps working.
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import pg from 'pg';
@@ -125,6 +125,15 @@ export async function compose(env: Env, options: { actions?: (runtime: Runtime) 
     ...(existsSync(join(enginesDir, 'discovery', 'src', 'engine', 'index.ts')) ? { discovery: port('discovery', 'Discovery') } : {}),
     ...(existsSync(join(enginesDir, 'correspondence', 'src', 'engine', 'index.ts')) ? { correspondence: port('correspondence', 'Correspondence') } : {}),
     budget, authorization } });
+  factories.release = (m) => {
+    // Jurisdiction packs are deployment data: every *.json file in PAM_JURISDICTION_PACKS_DIR.
+    const dir = env.PAM_JURISDICTION_PACKS_DIR; const packs = dir && existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8'))) : [];
+    const root = join(resolve(env.PAM_DATA_DIR ?? './data'), 'destinations'); mkdirSync(root, { recursive: true });
+    return m.createEngine({ sql, objects: objectsFor(env, 'release'), ports: { useDecision: useDecisions, authorization, evidence,
+      useRegister: { recordUse: async (ctx: ServiceContext, input: unknown) => need('consent').recordUse({ ...(await serviceContext({ tenantId: ctx.tenantId, projectId: ctx.projectId })), requestId: ctx.requestId }, input) } },
+      config: { jurisdictionPacks: packs, destinations: { roots: [root, ...(env.RELEASE_DESTINATION_ROOTS ? env.RELEASE_DESTINATION_ROOTS.split(':') : [])], ...(env.RELEASE_DOWNLOAD_SECRET ? { downloadSecret: env.RELEASE_DOWNLOAD_SECRET } : {}), ...(env.PAM_PUBLIC_URL ? { publicBaseUrl: `${env.PAM_PUBLIC_URL}/api/e/release` } : {}) },
+        ...(env.RELEASE_ACCOUNTABILITY_POLICY ? { accountabilityPolicy: env.RELEASE_ACCOUNTABILITY_POLICY } : {}) } });
+  };
   const generic = (short: string) => (m: Record<string, any>): unknown => m.createEngine({ sql, objects: objectsFor(env, short), ports: { authorization, useDecisions, evidence, budget }, config: {} }); // eslint-disable-line @typescript-eslint/no-explicit-any
 
   for (const [id, short] of ENGINE_ORDER) {

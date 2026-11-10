@@ -48,6 +48,8 @@ test('A: evidence is preserved, processed, linked to claims and investigated; a 
   // final assessments need the exact approval capability: the investigator proposes, a reviewer records
   await assert.rejects(knowledge.recordAssessment(research, paid.id, { dimension: 'factual', value: 'supported', rationale: 'x'.repeat(60), documentedRationale: true }), (e: any) => e.code === 'forbidden');
   await knowledge.recordAssessment(await orgA.as(reviewer, 'editorial'), paid.id, { dimension: 'factual', value: 'supported', rationale: 'Both transfers appear in the fund ledger extract, a primary financial record preserved as evidence.', documentedRationale: true });
+  await knowledge.createEvent(research, { title: 'First transfer of 4,200 to Riverside Supplies Ltd', time: { earliest: '2026-03-03T00:00:00Z', latest: '2026-03-03T23:59:59Z', precision: 'day' }, claimIds: [paid.id] });
+  await knowledge.createEvent(research, { title: 'Second transfer of 4,200 to Riverside Supplies Ltd, authorisation not recorded', time: { earliest: '2026-03-09T00:00:00Z', latest: '2026-03-09T23:59:59Z', precision: 'day' }, claimIds: [unauthorised.id] });
   const gaps = await knowledge.researchGaps(research, {});
   assert.ok(JSON.stringify(gaps).includes(unauthorised.id), 'the unassessed allegation is reported as a research gap');
   // an agent cannot finalise an assessment
@@ -77,10 +79,30 @@ test('A: evidence is preserved, processed, linked to claims and investigated; a 
   assert.ok(pkg.markdown.includes(a.sha256), 'evidence index carries the retained digest');
   console.log('package', pkg.ref, pkg.digest.slice(0, 12));
 
+  // 4b. Deliverables: factual chronology, evidence index and a jurisdiction-configured legal-support draft, for private review.
+  const release = runtime.get('release');
+  const { toReleasePackage, toEvidenceItems } = await import('../../src/app/adapters.ts');
+  const releaser = await stack.addUser(orgA, 'Rosa Release', ['release_manager']);
+  const rel = await orgA.as(releaser, 'release');
+  const input = toReleasePackage(pkg) as any;
+  const chrono = await release.buildPackage(rel, { kind: 'chronology', title: 'Chronology: relief fund payments', audience: 'internal_review', formats: ['html'], package: input, idempotencyKey: 'chrono' });
+  const bundle = await release.buildPackage(rel, { kind: 'evidence_bundle', title: 'Evidence index', audience: 'internal_review', formats: ['html'], items: toEvidenceItems(pkg), idempotencyKey: 'bundle' });
+  const draft = await release.buildPackage(rel, { kind: 'legal_draft', title: 'Oversight complaint (draft)', audience: 'legal_counsel', formats: ['html', 'pdf'], jurisdictionPackId: 'example-republic', documentType: 'oversight_complaint', package: input, values: { oversight_body: 'Example Republic Charities Board', complainant: 'Riverside Relief Watch' }, idempotencyKey: 'draft' });
+  for (const c of [chrono, bundle, draft]) assert.equal(c.state, 'built', `${c.kind}: ${JSON.stringify(c.leakReport).slice(0, 400)}`);
+  const text = async (c: any): Promise<string> => { let out = ''; for (const comp of c.components.filter((x: any) => /\.(md|html|json)$/.test(x.path))) { const got = await release.getComponent(rel, c.id, comp.path); out += new TextDecoder().decode(got.bytes ?? got); } return out; };
+  const draftText = await text(draft);
+  assert.match(draftText, /DRAFT/); assert.match(draftText, /not reviewed by a legal professional/i); assert.match(draftText, /authority to be identified|unresolved/i);
+  assert.ok(draftText.includes(a.ref), 'the legal-support draft identifies its factual sources');
+  assert.ok((await text(bundle)).includes(a.sha256), 'evidence index lists retained digests');
+  const chronoText = await text(chrono);
+  assert.match(chronoText, /2026-03-03[\s\S]*2026-03-09/, 'chronology is ordered'); assert.match(chronoText, /established/i); assert.match(chronoText, /unknown|disputed/i, 'unestablished entries are labelled, not presented as fact');
+  console.log('deliverables', chrono.ref, bundle.ref, draft.ref, 'draft components', draft.components.map((x: any) => x.path).join(','));
+
   // 5. Isolation: the second organization cannot reach any of it through any engine surface.
-  const ownerB = await orgB.as(orgB.owner, 'research');
-  for (const [name, engine] of [['evidence', evidence], ['processing', processing], ['knowledge', knowledge], ['investigation', investigation]] as const) {
-    for (const ref of [a.ref, rep.ref, paid.ref, inv.ref, pkg.ref]) assert.equal(await engine.inspect(ownerB, ref), null, `${name}.inspect leaks ${ref}`);
+  // organization B's owner holds every read capability there (purpose 'workspace' reads across all engines)
+  const ownerB = { ...(await orgB.as(orgB.owner, 'research')), capabilities: [...new Set([...(await orgB.as(orgB.owner, 'research')).capabilities, ...(await orgB.as(orgB.owner, 'workspace')).capabilities])] };
+  for (const [name, engine] of [['evidence', evidence], ['processing', processing], ['knowledge', knowledge], ['investigation', investigation], ['release', release]] as const) {
+    for (const ref of [a.ref, rep.ref, paid.ref, inv.ref, pkg.ref, draft.ref]) assert.equal(await engine.inspect(ownerB, ref), null, `${name}.inspect leaks ${ref}`);
     assert.deepEqual(await engine.search(ownerB, { q: 'Riverside' }), [], `${name}.search leaks`);
     assert.deepEqual(await engine.audit({ ...ownerB, capabilities: [...ownerB.capabilities, `${name}:audit`] }, {}), [], `${name}.audit leaks`);
   }
