@@ -15,4 +15,4 @@ COPY . .
 ENV HOST=0.0.0.0 PORT=8080 PAM_DATA_DIR=/data
 VOLUME /data
 EXPOSE 8080
-CMD ["node", "src/app/main.ts", "serve"]
+CMD ["sh", "scripts/container-start.sh"]
