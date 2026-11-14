@@ -5,12 +5,12 @@
     "identity": {
       "id": "E01",
       "repository": "Identity-Authorization-and-Policy-Engine",
-      "revision": "bea345c2a0630c0ac0c5621f4e61041b4ea13292"
+      "revision": "c5324947898dfe2d5e0562ff40fdc47bf9f7b942"
     },
     "intake": {
       "id": "E02",
       "repository": "Secure-Intake-Case-Workflow-Engine",
-      "revision": "47443485a53e6ca69aad0ae69412ee21b3b4af1b",
+      "revision": "079f73343dd486b5f1c7acf5bd9e8b8f21247ac0",
       "external": true
     },
     "correspondence": {
@@ -36,12 +36,12 @@
     "knowledge": {
       "id": "E07",
       "repository": "Knowledge-and-verification-engine",
-      "revision": "ad3617e10a5e38eb0c78e503a357e6a6f96eb3e8"
+      "revision": "e620c9a439443aa0667b5326f3fc5ca37dd03e74"
     },
     "investigation": {
       "id": "E08",
       "repository": "Factual-investigation-engine",
-      "revision": "5951942de0e8e5e0900262fe573af0b105b6ea49"
+      "revision": "d586e4964dd5d84181f2c13ad69865efa7156fc4"
     },
     "editorial": {
       "id": "E09",
@@ -71,7 +71,7 @@
     "workspace": {
       "id": "E14",
       "repository": "Visual-workspace-and-audit-engine",
-      "revision": "27f2a14e89ce2e8449c383c46fe95a020f29be6b"
+      "revision": "28cf64f7f948ef4b28f8dacdda8d528ce7876c91"
     }
   }
 }

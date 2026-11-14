@@ -50,7 +50,13 @@ export async function restore() {
   try { saved = JSON.parse(sessionStorage.getItem(STORE) ?? 'null'); } catch { saved = null; }
   if (!saved?.refreshToken) return false;
   state.refreshToken = saved.refreshToken; state.tenantId = saved.tenantId ?? null; state.projectId = saved.projectId ?? null;
-  try { await loadDirectory(); return true; }
+  try {
+    // The stored refresh token is exchanged for a new one on every restore; the identity engine ends the session if the
+    // retired token is ever presented again (for example a copy taken from this browser's storage).
+    try { state.refreshToken = (await publicPost('/v1/sessions/refresh', { refreshToken: state.refreshToken })).refreshToken; save(); }
+    catch (error) { if (!(error instanceof ApiError && error.status === 404)) throw error; /* identity engine without rotation */ }
+    await loadDirectory(); return true;
+  }
   catch (error) {
     if (error instanceof ApiError && (error.status === 401 || error.status === 400 || error.status === 403)) { clearSession(); return false; }
     throw error;
