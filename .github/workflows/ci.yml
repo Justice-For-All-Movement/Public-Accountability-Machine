@@ -29,7 +29,9 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             poppler-utils tesseract-ocr tesseract-ocr-eng tesseract-ocr-spa ffmpeg libreoffice-writer pandoc imagemagick \
             librsvg2-bin libimage-exiftool-perl sox fluidsynth fluid-soundfont-gm espeak-ng clamav apertium apertium-eng-spa \
-            python3-numpy fonts-dejavu-core zip unzip
+            python3-numpy fonts-dejavu-core zip unzip postgresql-client-16
+          # Backup/restore in acceptance test E needs client tools of the server's major version (16, as in production).
+          echo /usr/lib/postgresql/16/bin >> "$GITHUB_PATH"
           pip3 install --break-system-packages pocketsphinx==5.1.1
       - run: npm ci
       # The application is composed from the exact engine revisions in engines.lock.json.
