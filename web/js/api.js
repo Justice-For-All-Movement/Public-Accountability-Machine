@@ -62,8 +62,11 @@ export async function restore() {
     throw error;
   }
 }
-export async function signIn(login, password) {
-  const out = await publicPost('/v1/sessions', { login, password });
+export async function signIn(login, password, code) {
+  const second = typeof code === 'string' ? code.trim() : '';
+  // Six digits from an authenticator app, or a recovery code (letters and dashes).
+  const extra = second === '' ? {} : /^\d{6}$/.test(second) ? { code: second } : { recoveryCode: second };
+  const out = await publicPost('/v1/sessions', { login, password, ...extra });
   state.refreshToken = out.refreshToken; state.tokens.clear();
   await loadDirectory();
   return state.directory;

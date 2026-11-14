@@ -5,7 +5,7 @@
     "identity": {
       "id": "E01",
       "repository": "Identity-Authorization-and-Policy-Engine",
-      "revision": "c5324947898dfe2d5e0562ff40fdc47bf9f7b942"
+      "revision": "c7c33fcccd7b14c49428416265c6d7a9171f0f5b"
     },
     "intake": {
       "id": "E02",
@@ -41,7 +41,7 @@
     "investigation": {
       "id": "E08",
       "repository": "Factual-investigation-engine",
-      "revision": "d586e4964dd5d84181f2c13ad69865efa7156fc4"
+      "revision": "d46c7da950b4ac81d9137d786a96ef173fae692b"
     },
     "editorial": {
       "id": "E09",
@@ -56,7 +56,7 @@
     "consent": {
       "id": "E11",
       "repository": "Consent-rights-and-use-decisions-engine",
-      "revision": "9f6e8e1224aabba016e84fc10a3ddf8945b1f2bc"
+      "revision": "be8bf8cdaf333b5278027663eeffaf4a36b6f08a"
     },
     "release": {
       "id": "E12",

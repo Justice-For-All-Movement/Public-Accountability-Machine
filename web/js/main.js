@@ -59,9 +59,10 @@ function signInView() {
   clear(main);
   const intro = h('p', { class: 'pam-intro', text: 'Sign in with your organization account. Your session ends when you sign out or close this tab.' });
   const f = form({ legend: 'Account', submit: 'Sign in', resetOnSuccess: false,
-    fields: [{ name: 'login', label: 'Login', required: true, autocomplete: 'username' }, { name: 'password', label: 'Password', type: 'password', required: true, autocomplete: 'current-password' }],
+    fields: [{ name: 'login', label: 'Login', required: true, autocomplete: 'username' }, { name: 'password', label: 'Password', type: 'password', required: true, autocomplete: 'current-password' },
+      { name: 'code', label: 'One-time code (only if two-factor sign-in is on for your account; a recovery code also works)', autocomplete: 'one-time-code' }],
     onSubmit: async (v) => {
-      await session.signIn(v.login, v.password);
+      await session.signIn(v.login, v.password, v.code);
       queueMicrotask(() => route());
       return 'Signed in.';
     } });
@@ -125,7 +126,8 @@ $('pam-signout').addEventListener('click', async () => {
   await session.signOut();
   history.pushState(null, '', '/');
   announce('Signed out.');
-  void route();
+  // The session-change listener has already shown the sign-in view; render only if it did not (no second redraw).
+  if (app.screen !== null) void route();
 });
 $('pam-nav-toggle').addEventListener('click', () => {
   const nav = $('pam-nav');

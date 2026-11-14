@@ -20,6 +20,7 @@ export const SCREENS = [
   { id: 'resources', title: 'Resources', purpose: 'finance', render: lazy(() => import('./resources.js')) },
   { id: 'audit', title: 'Audit', purpose: 'audit', render: lazy(() => import('./audit.js')) },
   { id: 'admin', title: 'Administration', purpose: 'administration', render: lazy(() => import('./admin.js')) },
+  { id: 'account', title: 'Account security', purpose: 'workspace', render: lazy(() => import('./account.js')) },
   { id: 'search', title: 'Search', purpose: 'workspace', hidden: true, render: lazy(() => import('./search.js')) },
   { id: 'not-found', title: 'Page not found', hidden: true, render: async (el) => { el.append(h('p', { text: 'There is no screen at this address.' }), h('p', {}, h('a', { href: '/overview', 'data-nav': true }, 'Go to the overview'))); } },
 ];
