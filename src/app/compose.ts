@@ -11,6 +11,9 @@ import { FsObjectStore, S3ObjectStore, pgSql } from '../service-kit.ts';
 import type { AuthorizationPort, BudgetPort, EvidencePort, ObjectStore, Route, ServiceContext, Sql, StandardEngine, TokenVerifier, UseDecisionPort } from '../service-kit.ts';
 import * as orchestrationModule from '../orchestration/index.ts';
 import * as adapters from './adapters.ts';
+import { modelFromEnv } from './model.ts';
+import type { ModelPort } from './model.ts';
+import { editorialModelPort } from './agents.ts';
 import type { OrchestrationEngine } from '../orchestration/index.ts';
 
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -29,6 +32,8 @@ export const ENGINE_ORDER: readonly (readonly [string, string])[] = [
 export type Runtime = Readonly<{
   env: Env; sql: Sql; engines: ReadonlyMap<string, EngineEntry>; orchestration: OrchestrationEngine;
   verify: TokenVerifier;
+  /** The deployment's language model, or null when none is configured (model-backed work then reports `unavailable`). */
+  model: ModelPort | null;
   /** Authorized context for PAM's own service identity in one organization and project. Fails closed if not provisioned. */
   serviceContext(scope: Scope, purpose?: string): Promise<ServiceContext>;
   get(short: string): AnyEngine;
@@ -79,11 +84,12 @@ export async function migrateApp(sql: Sql): Promise<void> {
   await sql.query(`create table if not exists ${APP_SCHEMA}.settings (tenant_id text not null, project_id text not null, key text not null, value jsonb not null, updated_by text not null, updated_at timestamptz not null default now(), primary key (tenant_id, project_id, key))`);
 }
 
-export async function compose(env: Env, options: { actions?: (runtime: Runtime) => Record<string, orchestrationModule.ActionDefinition>; migrate?: boolean } = {}): Promise<Runtime> {
+export async function compose(env: Env, options: { actions?: (runtime: Runtime) => Record<string, orchestrationModule.ActionDefinition>; migrate?: boolean; model?: ModelPort | null } = {}): Promise<Runtime> {
   if (!env.DATABASE_URL) throw new DomainError('invalid_config', 'DATABASE_URL is required');
   const pool = new pg.Pool({ connectionString: env.DATABASE_URL, max: Number(env.DATABASE_POOL_MAX ?? 20) });
   const sql = pgSql(pool);
   const enginesDir = resolve(env.PAM_ENGINES_DIR ?? './engines');
+  const model = options.model === undefined ? modelFromEnv(env) : options.model;
   const entries = new Map<string, EngineEntry>();
   const doMigrate = options.migrate !== false;
   if (doMigrate) { await migrateApp(sql); await orchestrationModule.migrate(sql); await sql.query(`create table if not exists ${APP_SCHEMA}.intake_links (tenant_id text not null, intake_kind text not null, intake_id text not null, pam_ref text not null, created_at timestamptz not null default now(), primary key (tenant_id, intake_kind, intake_id))`); }
@@ -147,7 +153,7 @@ export async function compose(env: Env, options: { actions?: (runtime: Runtime) 
       ...(env.DISCOVERY_ALLOWED_PORTS ? { allowedPorts: env.DISCOVERY_ALLOWED_PORTS.split(',').map(Number) } : {}), ...(env.DISCOVERY_CREDENTIAL_KEY ? { credentialKey: env.DISCOVERY_CREDENTIAL_KEY } : {}), ...(env.DISCOVERY_MIN_INTERVAL_MS ? { defaultMinIntervalMs: Number(env.DISCOVERY_MIN_INTERVAL_MS) } : {}), ...(env.DISCOVERY_LEASE_MS ? { leaseMs: Number(env.DISCOVERY_LEASE_MS) } : {}) } });
   factories.correspondence = (m) => m.createEngine({ sql, objects: objectsFor(env, 'correspondence'), ports: { authorization, budget, evidence, useDecision: useDecisions },
     config: { ...(env.CORRESPONDENCE_SECRET_KEY ? { secretKey: env.CORRESPONDENCE_SECRET_KEY } : {}), provider: { allowPrivateHosts: env.CORRESPONDENCE_ALLOW_PRIVATE_HOSTS === '1', allowInsecureTls: env.CORRESPONDENCE_ALLOW_INSECURE_TLS === '1' }, ...(env.CORRESPONDENCE_RECONCILE_DELAY_MS ? { reconcileDelayMs: Number(env.CORRESPONDENCE_RECONCILE_DELAY_MS) } : {}) } });
-  factories.editorial = (m) => m.createEngine({ sql, objects: objectsFor(env, 'editorial'), ports: { knowledge: adapters.editorialKnowledgePort(need), useDecisions, authorization } });
+  factories.editorial = (m) => m.createEngine({ sql, objects: objectsFor(env, 'editorial'), ports: { knowledge: adapters.editorialKnowledgePort(need), useDecisions, authorization, ...(model === null ? {} : { model: editorialModelPort(model) }) } });
   // E14 aggregates the other engines through their standard surfaces, always with the CALLER's context.
   const ENGINE_IDS: Record<string, string> = Object.fromEntries(ENGINE_ORDER.map(([id, short]) => [id, short]));
   const engineMap = new Proxy({} as Record<string, unknown>, {
@@ -224,7 +230,7 @@ export async function compose(env: Env, options: { actions?: (runtime: Runtime) 
   });
 
   const runtime: Runtime = {
-    env, sql, engines: entries, orchestration, verify, serviceContext, maybe,
+    env, sql, engines: entries, orchestration, verify, model, serviceContext, maybe,
     get(short) { const e = maybe(short); if (e === null) throw new DomainError('unavailable', `${short} engine is unavailable: ${entries.get(short)?.error ?? 'not installed'}`); return e; },
     async close() { await pool.end(); },
   };

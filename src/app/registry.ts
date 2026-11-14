@@ -7,6 +7,7 @@ import type { Json } from '../contracts.ts';
 import type { Route } from '../service-kit.ts';
 import type { ActionContext, ActionDefinition } from '../orchestration/index.ts';
 import type { Runtime } from './compose.ts';
+import { loadAgentActions } from './agents.ts';
 
 type Any = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 const str = (input: Json, key: string): string => {
@@ -29,6 +30,7 @@ const key = (a: ActionContext, suffix = ''): string => `e00-${a.task.id}${suffix
 
 export function loadActions(runtime: Runtime): Record<string, ActionDefinition> {
   return {
+    ...loadAgentActions(runtime, runtime.model),
     'processing.process_evidence': {
       description: 'Extract text, OCR, transcribe and index one preserved evidence version (input: evidenceRef).',
       requires: ['processing:write', 'processing:read'],

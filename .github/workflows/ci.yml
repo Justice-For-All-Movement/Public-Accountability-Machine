@@ -5,7 +5,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:16
@@ -15,13 +15,40 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:fixture-admin-only@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version-file: .node-version
           cache: npm
+      - name: System tools used by the engines
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            poppler-utils tesseract-ocr tesseract-ocr-eng tesseract-ocr-spa ffmpeg libreoffice-writer pandoc imagemagick \
+            librsvg2-bin libimage-exiftool-perl sox fluidsynth fluid-soundfont-gm espeak-ng clamav apertium apertium-eng-spa \
+            python3-numpy fonts-dejavu-core zip unzip
+          pip3 install --break-system-packages pocketsphinx==5.1.1
       - run: npm ci
+      # The application is composed from the exact engine revisions in engines.lock.json.
+      - name: Install pinned engines
+        run: node scripts/bootstrap-engines.mjs
+      - name: Build the intake application (E02)
+        working-directory: engines/intake
+        run: npm ci --no-audit --no-fund && npm run build
+      - name: Browser for acceptance and interface tests
+        run: npm install --no-save --no-audit --no-fund playwright@1.63.0 && npx playwright install --with-deps chromium
       - run: npm run check
-        env:
-          TEST_DATABASE_URL: postgresql://postgres:fixture-admin-only@127.0.0.1:5432/postgres
+      - name: Acceptance tests A–E on the composed application
+        # A skipped acceptance test is a failure here: CI must really execute the composed application.
+        run: |
+          set -o pipefail
+          npm run test:acceptance | tee acceptance.out
+          grep -q '^ℹ skipped 0$' acceptance.out
+      - name: Browser tests
+        run: |
+          set -o pipefail
+          npm run test:browser | tee browser.out
+          grep -q '^ℹ skipped 0$' browser.out
