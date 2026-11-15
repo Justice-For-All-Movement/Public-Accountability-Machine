@@ -40,7 +40,8 @@ Evidence (session 2):
 - Worker instructions used for engines: `docs/WORKER_BRIEF.md`.
 
 - **Merged**: every repository's `feature/pam-completion` was fast-forwarded into `main` (editorial and production got a
-  `main` branch, now their default) after CI passed on every head.
+  `main` branch; their GitHub default branch still names `feature/pam-completion`, which holds the same commit, and is
+  changed in each repository's settings) after CI passed on every head. The Render services deploy from `main`.
 
 ## Known defects / limits (see also each engine's docs/ENGINE_API.md "Not implemented")
 
