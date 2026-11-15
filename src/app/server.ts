@@ -40,6 +40,40 @@ export function appRoutes(runtime: Runtime, state: AppState, extra: (runtime: Ru
       const engines = await Promise.all([...runtime.engines.values()].map(async (e) => ({ id: e.id, short: e.short, available: e.available, error: e.error, health: e.engine === null ? null : await e.engine.health().catch((error: unknown) => ({ ok: false, detail: { error: String(error) } })) })));
       return { orchestration: await runtime.orchestration.health(), engines, worker: { passes: state.workerPasses, lastError: state.lastWorkerError, lastRouter: state.lastRouter, lastIntake: state.lastIntake ?? null } } as unknown as Json;
     } },
+    // Needs attention: stale/blocked/failed/uncertain/no-response/review items recorded by the event router. Each item is
+    // shown only when the owning engine lets THIS caller inspect its subject; hidden material is neither listed nor counted.
+    { method: 'GET', path: '/v1/alerts', handler: async (r) => {
+      requireCapability(r.ctx, 'workspace:read');
+      const all = r.query.get('all') === '1';
+      const rows = await runtime.sql.query<{ event_key: string; engine: string; type: string; subject: string; at: Date; acked: Date | null }>(
+        `select a.event_key, a.engine, a.type, a.subject, a.at, k.at as acked from ${APP_SCHEMA}.alerts a left join ${APP_SCHEMA}.alert_acks k on k.tenant_id=a.tenant_id and k.actor_id=$3 and k.event_key=a.event_key
+         where a.tenant_id=$1 and a.project_id=$2 ${all ? '' : 'and k.at is null'} order by a.at desc limit 300`, [r.ctx.tenantId, r.ctx.projectId, r.ctx.actor.id]);
+      const byId = new Map([...runtime.engines.values()].map((e) => [e.id, e]));
+      const seen = new Map<string, { title: string; state: string; stale: boolean; blocked: boolean } | null>();
+      const items: Json[] = [];
+      for (const row of rows) {
+        const owner = byId.get(row.subject.split(':')[0] ?? '');
+        if (!seen.has(row.subject)) {
+          let view: { title: string; state: string; stale: boolean; blocked: boolean } | null = null;
+          try { const i = owner?.engine === null || owner === undefined ? null : await owner.engine.inspect(r.ctx, row.subject) as { title: string; state: string; stale: boolean; blocked: boolean } | null; view = i === null ? null : { title: i.title, state: i.state, stale: i.stale, blocked: i.blocked }; }
+          catch { view = null; }
+          seen.set(row.subject, view);
+        }
+        const view = seen.get(row.subject);
+        if (view === null || view === undefined) continue;
+        items.push({ eventKey: row.event_key, engine: row.engine, type: row.type, subject: row.subject, at: row.at.toISOString(), acknowledgedAt: row.acked === null ? null : row.acked.toISOString(), title: view.title, state: view.state, stillStale: view.stale, stillBlocked: view.blocked });
+        if (items.length >= 100) break;
+      }
+      return { items, generatedAt: new Date().toISOString() } as unknown as Json;
+    } },
+    { method: 'POST', path: '/v1/alerts/acknowledge', handler: async (r) => {
+      requireCapability(r.ctx, 'workspace:read');
+      const keys = (r.body as { eventKeys?: unknown } | null)?.eventKeys;
+      if (!Array.isArray(keys) || keys.length === 0 || keys.length > 200 || !keys.every((k) => typeof k === 'string' && k.length <= 200)) throw new DomainError('invalid_input', 'eventKeys must list 1 to 200 alert keys');
+      await runtime.sql.query(`insert into ${APP_SCHEMA}.alert_acks (tenant_id, actor_id, event_key, at) select $1, $2, a.event_key, now() from ${APP_SCHEMA}.alerts a where a.tenant_id=$1 and a.project_id=$3 and a.event_key = any($4::text[]) on conflict do nothing`,
+        [r.ctx.tenantId, r.ctx.actor.id, r.ctx.projectId, keys]);
+      return { acknowledged: keys.length };
+    } },
     // Creates PAM's own service identity in the caller's organization so workers and the event router can act there.
     { method: 'POST', path: '/v1/provision', handler: async (r) => { requireCapability(r.ctx, 'identity:admin'); return (await provisionOrganization(runtime, r.ctx)) as unknown as Json; } },
     // Run after /v1/provision with a fresh token, repeatedly until `again` is false.

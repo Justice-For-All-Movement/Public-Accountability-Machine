@@ -1,6 +1,6 @@
 // Overview: engine status, orchestration overview, budget summary.
 import { api, appApi } from '../api.js';
-import { h, region, section, table, listOrEmpty, renderEmpty, dl, badge } from '../ui.js';
+import { h, region, section, table, listOrEmpty, renderEmpty, dl, badge, ref, action } from '../ui.js';
 
 export function flattenBudgets(nodes, depth = 0, out = []) {
   for (const n of Array.isArray(nodes) ? nodes : []) { out.push({ ...n, depth }); flattenBudgets(n.children, depth + 1, out); }
@@ -9,8 +9,19 @@ export function flattenBudgets(nodes, depth = 0, out = []) {
 const minutes = (ms) => `${(Number(ms) / 60000).toFixed(1)} min`;
 
 export async function render(el, ctx) {
+  const attention = region('Needs attention', 2, 'Items that became stale, blocked, failed, uncertain or unanswered, or need a review. Only items you are allowed to see are listed. Acknowledging hides an item for you; it changes nothing in the engines.');
   const engines = region('Engines'); const orch = region('Orchestration'); const budgets = region('Budgets');
-  el.append(engines.el, orch.el, budgets.el);
+  el.append(attention.el, engines.el, orch.el, budgets.el);
+  const reloadAlerts = section(attention.body, () => appApi('/v1/alerts', { purpose: ctx.purpose }), (out, body) => {
+    const label = (t) => t.replace(/^[a-z]+\./, '').replaceAll('_', ' ');
+    listOrEmpty(body, out.items, 'Nothing needs attention', 'Nothing is stale, blocked, failed, uncertain or unanswered in this project.', { caption: `Needs attention (as of ${new Date(out.generatedAt).toLocaleString()})`, columns: [
+      { key: 'at', label: 'When', render: (r) => h('time', { datetime: r.at, text: new Date(r.at).toLocaleString() }) },
+      { key: 'type', label: 'What happened', render: (r) => h('span', { text: label(r.type) }) },
+      { key: 'subject', label: 'Item', sortable: false, render: (r) => ref(r.subject, r.title || r.subject) },
+      { key: 'state', label: 'Now', render: (r) => h('span', { text: [r.state, r.stillStale ? 'still stale' : null, r.stillBlocked ? 'still blocked' : null].filter(Boolean).join(', ') }) },
+      { key: 'eventKey', label: 'Acknowledge', sortable: false, render: (r) => action('Acknowledge', async () => { await appApi('/v1/alerts/acknowledge', { purpose: ctx.purpose, body: { eventKeys: [r.eventKey] } }); queueMicrotask(reloadAlerts); return 'Acknowledged.'; }) },
+    ] });
+  });
   section(engines.body, async () => ({ status: await appApi('/v1/status'), overview: await api('workspace', '/v1/overview', { purpose: ctx.purpose }).catch((e) => ({ error: e })) }), ({ status, overview }, body) => {
     const detail = new Map((overview.engines ?? []).map((e) => [e.engine, e]));
     table(body, { caption: 'Engine availability in this deployment', rows: status.engines, columns: [

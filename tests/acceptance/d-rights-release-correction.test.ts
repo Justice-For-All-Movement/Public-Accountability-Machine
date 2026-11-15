@@ -9,6 +9,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { REQUIRED, skipReason, withStack } from './harness.ts';
 import { toReleasePackage } from '../../src/app/adapters.ts';
+import { appRoutes } from '../../src/app/server.ts';
 
 const skip = skipReason([...REQUIRED, 'editorial', 'consent']);
 const walk = (dir: string): string[] => readdirSync(dir).flatMap((n) => { const p = join(dir, n); return statSync(p).isDirectory() ? walk(p) : [p]; });
@@ -125,5 +126,20 @@ test('D: restrictions → private review → exact approval → controlled relea
   const rebuild = await release.buildPackage(rel, { kind: 'investigation_report', title: 'Report v2', audience: 'legal_counsel', formats: ['html'], package: input, subjects: [subject], protectedTerms: ['Heron'], supersedes: cand.id, idempotencyKey: 'report-2' });
   const deny = await release.approve(rel, rebuild.id, { candidateDigest: rebuild.digest, audience: 'legal_counsel', destinationId: dest.id, expiresAt }).then(() => 'approved', (e: any) => e.code);
   assert.notEqual(deny, 'approved', 'after withdrawal no new approval is possible for material using the testimony');
+  // Needs attention: the router recorded the stale and blocked items; each viewer sees only what they may inspect.
+  const routes = appRoutes(runtime, stack.state);
+  const call = async (ctx: any, method: string, path: string, body: unknown = null, query = '') => (routes.find((r) => r.method === method && r.path === path)!.handler as any)({ ctx, body, params: {}, query: new URLSearchParams(query), headers: {} });
+  const alerts = await call(await org.as(editor, 'workspace'), 'GET', '/v1/alerts');
+  assert.ok(alerts.items.length > 0, 'stale and blocked items appear in the alert panel');
+  assert.ok(alerts.items.every((a: any) => /stale|blocked|failed|uncertain|no_response|review|expir|refused/.test(a.type) && typeof a.title === 'string'));
+  assert.ok(alerts.items.some((a: any) => a.subject.startsWith('E09:')), `the editor sees editorial items: ${alerts.items.map((a: any) => a.type).join(', ')}`);
+  const other = await stack.createOrg('Unrelated Watch');
+  assert.deepEqual((await call(await other.as(other.owner, 'workspace'), 'GET', '/v1/alerts')).items, [], 'another organization sees nothing');
+  const first = alerts.items[0];
+  await call(await org.as(editor, 'workspace'), 'POST', '/v1/alerts/acknowledge', { eventKeys: [first.eventKey] });
+  const after = await call(await org.as(editor, 'workspace'), 'GET', '/v1/alerts');
+  assert.ok(!after.items.some((a: any) => a.eventKey === first.eventKey), 'acknowledged for this viewer');
+  assert.ok((await call(await org.as(editor, 'workspace'), 'GET', '/v1/alerts', null, 'all=1')).items.some((a: any) => a.eventKey === first.eventKey && a.acknowledgedAt !== null));
+  assert.ok((await call(await org.as(editor2, 'workspace'), 'GET', '/v1/alerts')).items.some((a: any) => a.eventKey === first.eventKey), 'other viewers still see it');
   console.log('withdrawal affected', withdrawal.affectedOutputs.length, 'outputs;', 'flags', JSON.stringify(flags));
 }));

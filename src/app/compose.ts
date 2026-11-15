@@ -81,6 +81,10 @@ export const APP_SCHEMA = 'pam_app';
 export async function migrateApp(sql: Sql): Promise<void> {
   await sql.query(`create schema if not exists ${APP_SCHEMA}`);
   await sql.query(`create table if not exists ${APP_SCHEMA}.tenants (tenant_id text primary key, orchestrator_service_id text not null, home_project_id text not null, provisioned_at timestamptz not null default now())`);
+  // Attention items recorded by the event router from engine events (ids and types only; content stays in the engines).
+  await sql.query(`create table if not exists ${APP_SCHEMA}.alerts (tenant_id text not null, project_id text not null, event_key text not null, engine text not null, type text not null, subject text not null, at timestamptz not null, primary key (tenant_id, event_key))`);
+  await sql.query(`create index if not exists alerts_scope on ${APP_SCHEMA}.alerts (tenant_id, project_id, at desc)`);
+  await sql.query(`create table if not exists ${APP_SCHEMA}.alert_acks (tenant_id text not null, actor_id text not null, event_key text not null, at timestamptz not null, primary key (tenant_id, actor_id, event_key))`);
   await sql.query(`create table if not exists ${APP_SCHEMA}.settings (tenant_id text not null, project_id text not null, key text not null, value jsonb not null, updated_by text not null, updated_at timestamptz not null default now(), primary key (tenant_id, project_id, key))`);
 }
 

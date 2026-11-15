@@ -47,6 +47,9 @@ export const REACTIONS: readonly Reaction[] = [
   } },
 ];
 
+/** Event types that need a person's attention: shown in the alert panel to viewers who may see the subject. */
+export const ATTENTION = /(_stale|_blocked|\.stale|\.blocked|_failed|\.integrity_failed|_uncertain|\.no_response|_review_requested|\.review_requested|_expiring|_expired|qc_failed|retries_exhausted|\.refused)$/;
+
 export type RouterReport = { events: number; deliveries: number; failures: { engine: string; eventId: string; error: string }[] };
 
 export async function routeEventsOnce(runtime: Runtime, options: { batch?: number } = {}): Promise<RouterReport> {
@@ -82,6 +85,12 @@ export async function routeEventsOnce(runtime: Runtime, options: { batch?: numbe
           if (!reaction.match.test(event.type)) continue;
           try { await reaction.run(runtime, await runtime.serviceContext({ tenantId: event.tenantId, projectId: event.projectId }), event, `${entry.id}:${event.id}`); report.deliveries++; }
           catch (error) { ok = false; report.failures.push({ engine: 'reaction', eventId: `${entry.id}:${event.id}`, error: error instanceof Error ? error.message : String(error) }); }
+        }
+        if (ok && ATTENTION.test(event.type)) {
+          try {
+            await runtime.sql.query(`insert into pam_app.alerts (tenant_id, project_id, event_key, engine, type, subject, at) values ($1,$2,$3,$4,$5,$6,$7) on conflict do nothing`,
+              [event.tenantId, event.projectId, `${entry.id}:${event.id}`, entry.id, event.type, event.subject, new Date(event.occurredAt)]);
+          } catch (error) { ok = false; report.failures.push({ engine: 'alerts', eventId: `${entry.id}:${event.id}`, error: error instanceof Error ? error.message : String(error) }); }
         }
         if (!ok) break; // retry this event (and everything after it) on the next pass
         await runtime.orchestration.advanceRouterCursor(cursorKey, event.id);
