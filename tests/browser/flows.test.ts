@@ -121,6 +121,24 @@ test('objective, run and task board pause/resume; correspondence draft listed in
     await page.getByRole('button', { name: /^Drafts/ }).click();
     await page.getByRole('button', { name: 'Request for fictional records' }).waitFor();
     assert.match(await page.locator('.pam-folders button', { hasText: 'Drafts' }).innerText(), /1/);
+    // An inbound HTML message is shown only as the engine's sanitized rendering, sandboxed, with a no-network policy.
+    const correspondence = app.stack.runtime.get('correspondence');
+    const ingest = await app.org.as(app.org.owner, 'correspondence');
+    const [mailbox] = await correspondence.listMailboxes(ingest);
+    const html = ['From: clerk@example.net', 'To: desk@example.org', 'Subject: Formatted fictional notice', 'Message-ID: <html-notice@mail.example.net>', 'MIME-Version: 1.0',
+      'Content-Type: text/html; charset=utf-8', '', '<p onclick="steal()">Notice <b>17</b> is attached.</p><img src="https://tracker.invalid/p.gif"><script>alert(1)</script>', ''].join('\r\n');
+    await correspondence.ingestRawMessage({ ...ingest, capabilities: [...ingest.capabilities, 'correspondence:ingest'] }, mailbox.id, Buffer.from(html), {});
+    await page.goto(`${app.url}/correspondence`); await settled(page);
+    await page.getByRole('button', { name: /Formatted fictional notice/ }).click(); await settled(page);
+    await page.locator('summary', { hasText: 'Show the formatted version' }).first().click();
+    const frame = page.locator('iframe.pam-sandbox'); await frame.waitFor();
+    assert.equal(await frame.getAttribute('sandbox'), '');
+    const inner = await (await frame.elementHandle())!.contentFrame();
+    await inner!.locator('p', { hasText: 'Notice' }).waitFor();
+    const shown = await inner!.content();
+    assert.match(shown, /Content-Security-Policy" content="default-src 'none'/);
+    assert.match(shown, /<p>Notice <b>17<\/b> is attached\.<\/p>/);
+    assert.doesNotMatch(shown, /onclick|<img|tracker\.invalid|<script|alert/);
     assert.deepEqual(errors, []);
   });
 });

@@ -221,8 +221,16 @@ export function b64(file) {
 }
 export function bytesFromB64(s) { const bin = atob(s); const out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; }
 /** Shows untrusted HTML only inside a sandboxed iframe without scripts (blob URL), never in the page. */
+// Sandboxed frames run no scripts (sandbox="") and, through this policy, fetch nothing from the network: only inline
+// styles and data:/blob: media are allowed, so remote images (tracking beacons) and stylesheets never load.
+const SANDBOX_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:";
+export function withSandboxPolicy(html) {
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${SANDBOX_CSP}">`;
+  const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
+  return doctype ? `${doctype[0]}${meta}${html.slice(doctype[0].length)}` : `${meta}${html}`;
+}
 export function sandboxedHtml(html, title) {
-  const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+  const url = URL.createObjectURL(new Blob([withSandboxPolicy(String(html))], { type: 'text/html' }));
   const frame = h('iframe', { class: 'pam-sandbox', sandbox: '', title, src: url, referrerpolicy: 'no-referrer' });
   return frame;
 }
