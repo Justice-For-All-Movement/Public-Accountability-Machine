@@ -17,9 +17,9 @@ Acceptance tests (in `tests/acceptance/`): **A** intake → findings and deliver
 | R04 Thorough investigation | E08 questions, hypotheses, attempts, findings, checklist, closure guard, packages | E08 tests; A (closure blocked by open material question; package with limitations/unknowns) | integ | Interview plans and referral recommendations are records of E08 (closure guard, package, correction propagation). |
 | R05 Contact discovery with provenance | E04 lead extraction with route provenance; E03 contact plans with `whyMayKnow`/`routeSource`, human route verification | A (lead from acquired page), B (plan carries route + reason) | integ | Extraction is rule-based (mailto/contact sections/JSON-LD). |
 | R06 Honest autonomous outreach | E03 server-rendered structured inquiries with disclosure, role-claim rejection, grants, suppression, follow-up limits | B | integ | No live mail provider verified. |
-| R07 Inbox and takeover | E03 folders, labels, search, threads, assignment, attachments; atomic takeover; in-transit visibility; PAM correspondence screen | B (takeover cancels queued send; uncertain send stays in transit); E03 tests | integ | Browser tests of the inbox screen: see UI test results. |
-| R08 Systematic collection | E04 pagination, checkpoints, refresh, dedupe, rate limits, receipts, coverage, gaps, SSRF defence | E04 tests (crash/resume, SSRF matrix); A (controlled source); E (SIGKILL mid-collection) | integ | No JS rendering; robots meta ignored. |
-| R09 Preservation and provenance | E05 immutable versions, digests, custody chain, derivations, citations, retention, packages; intake copies keep E02 custody | E05 tests; A (intake custody carried over); E (backup/restore verify) | integ | S3 storage and official ClamAV signatures not verified. |
+| R07 Inbox and takeover | E03 folders, labels, search, threads, assignment, attachments; atomic takeover; in-transit visibility; PAM correspondence screen | B (takeover cancels queued send; uncertain send stays in transit); E03 tests | integ | Browser tests of the inbox screen: see UI test results. Inbound HTML: the PAM screen shows only E03's `sanitizedHtml` (allow-list) in a script-less, no-network sandbox; the original stays evidence (browser test). |
+| R08 Systematic collection | E04 pagination, checkpoints, refresh, dedupe, rate limits, receipts, coverage, gaps, SSRF defence | E04 tests (crash/resume, SSRF matrix); A (controlled source); E (SIGKILL mid-collection) | integ | No JS rendering. Page-level robots (`X-Robots-Tag`, meta robots) enforced since session 3: `nofollow` pages not followed, `noarchive` items kept at metadata level (E04 tests). |
+| R09 Preservation and provenance | E05 immutable versions, digests, custody chain, derivations, citations, retention, packages; intake copies keep E02 custody | E05 tests; A (intake custody carried over); E (backup/restore verify) | integ | S3 storage and official ClamAV signatures not verified. Opt-in scheduled disposal execution (`execute: true`, E05 tests) has no PAM screen; reachable through the E05 API only. |
 | R10 Multimodal processing | E06 pdftotext/tesseract OCR/LibreOffice/pandoc/ffmpeg, PocketSphinx ASR, diarization, Apertium translation, corrections with history | E06 tests (real tools); A, D (processing, correction) | integ | Local ASR weak (en-US only); whisper/remote providers implemented, unverified. |
 | R11 Evidence-linked knowledge | E07 entities, relationships, events, claims, statements, links, families | E07 tests; A | integ | — |
 | R12 Verification and challenge | E07 four separate assessment dimensions, human-only final assessments, supporting + challenging links, contradictions, alternatives | A (agent refused; reviewer records), E07 tests | integ | No numerical scores by design. |
@@ -31,7 +31,7 @@ Acceptance tests (in `tests/acceptance/`): **A** intake → findings and deliver
 | R18 Rights, consent, dignity | E11 purpose/audience/territory/time, multi-holder most-restrictive, no override, citation ≠ reproduction | D; E11 tests | integ | Audience names must be shared deployment vocabulary (E11 ↔ E12). |
 | R19 Controlled publication | E12 candidates, leak pipeline, exact-digest approvals, destinations, receipts, distribution history | D; E12 tests | integ | Only local-directory destination exercised end to end; SFTP never executed. |
 | R20 Corrections through the chain | Event router (`src/app/router.ts`) + every engine's `applyUpstreamChange` | D (correction → claim, finding, editorial approval, release approval, distribution follow-up; withdrawal blocks) | integ | — |
-| R21 Commercial sustainability | E13 budgets, ledger, contributors, agreements, licences, invoices, credit notes and recorded refunds, revenue, margins, sandbox + Stripe adapters | E13 tests; C, E (budgets) | integ (budgets) / local (ledger) | Stripe unverified (no credentials). |
+| R21 Commercial sustainability | E13 budgets, ledger, contributors, agreements, licences, invoices, credit notes and recorded refunds, revenue, margins, sandbox + Stripe adapters | E13 tests; C, E (budgets) | integ (budgets) / local (ledger) | Stripe unverified (no credentials). Reservations are settled only by their reserver or `resources:admin` (E13 tests). |
 | R22 Distinct identities | E01 organizations, projects with kind, purposes; E09 project kinds (satire/campaign separated) | A (two organizations), E09 tests | integ | — |
 | R23 Accountability materials | E12 report, chronology, evidence bundle, referral, records request, legal-support draft | A (chronology, evidence index, legal draft) | integ | Drafts never filed; no legal review claimed. |
 | R24 Global operation | Locales (E02), languages (E06 OCR/translation), jurisdiction packs (E12), calendars (E02) | E02/E06/E12 tests | local | Few language packs installed. |
@@ -50,6 +50,17 @@ Acceptance tests (in `tests/acceptance/`): **A** intake → findings and deliver
 - E06 structured extraction proposals (dates, amounts, references, links, tables) with round-tripping selectors.
 - E08 interview plans and referral recommendations. E11 withdraw-all for a holder (staff and participant).
 - E13 credit notes with recorded refunds. PAM alerts ("Needs attention"), model-backed agent actions, housekeeping.
+
+## Added in session 3
+
+- E05 opt-in execution of scheduled disposal (`setRetention({ action: 'schedule', execute: true })`, `evidence:admin`,
+  re-authorized at execution; holds and changed schedules delete nothing).
+- E04 enforcement of page-level robots directives (`X-Robots-Tag`, meta robots) under the `honour` policy.
+- E03 `sanitizedHtml` for inbound mail; PAM renders only it, and every PAM sandbox frame carries a no-network CSP.
+- E13 reservation commit/release restricted to the reserving actor (or `resources:admin`).
+- E02 hardening ported from SI-35..39 drafts (transport redirects, create-only S3 writes, envelope validation,
+  undeclared answer keys, `.dockerignore`, `npm ci`). Knowledge correction-impact PostgreSQL contention tests.
+- PAM CI pinned to `ubuntu-24.04` with an asserted PostgreSQL 16 client (26.04 runners ship no client 16).
 
 ## Open items (honest list)
 

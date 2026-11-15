@@ -10,33 +10,33 @@
     "intake": {
       "id": "E02",
       "repository": "Secure-Intake-Case-Workflow-Engine",
-      "revision": "079f73343dd486b5f1c7acf5bd9e8b8f21247ac0",
+      "revision": "8892d6856050e0b45aca102dca3c07ff08a3950f",
       "external": true
     },
     "correspondence": {
       "id": "E03",
       "repository": "Correspondence-and-Outreach-Engine",
-      "revision": "49ea7a3bbdb4fde149eee31abc5789a35df1c0fa"
+      "revision": "c5ce467277efb0e54cf2ecbc62f1607a4ca3ad94"
     },
     "discovery": {
       "id": "E04",
       "repository": "Discovery-and-Acquisition-Engine",
-      "revision": "530dbdb03d4441c03d3b0497128319b141c79e63"
+      "revision": "61f6ba7238cd0aaaefb133ec026e81853672b05d"
     },
     "evidence": {
       "id": "E05",
       "repository": "Evidence-Storage-and-Provenance-Engine",
-      "revision": "0764e4d1d485caaf69aa4da5ca6f60b8b3ec46dc"
+      "revision": "0ab51cd448a9703aaf21a106c3836b58f38a5062"
     },
     "processing": {
       "id": "E06",
       "repository": "Document-and-Media-Processing-Engine",
-      "revision": "3f7d943427606c89c0ff3b97dfe99a3418adbbd7"
+      "revision": "c36ded34292ee7581793a5f573f97440f65db5eb"
     },
     "knowledge": {
       "id": "E07",
       "repository": "Knowledge-and-verification-engine",
-      "revision": "e620c9a439443aa0667b5326f3fc5ca37dd03e74"
+      "revision": "697f868b1f48e6a9fa47e6cb7e303417df3b2cb6"
     },
     "investigation": {
       "id": "E08",
@@ -61,12 +61,12 @@
     "release": {
       "id": "E12",
       "repository": "Packaging-release-and-correction-engine",
-      "revision": "0a58ff4fe507efec99d10a7f0a06d28c56337f24"
+      "revision": "d8465c3aca23c11314e07aa9d042a2939c1b6e00"
     },
     "resources": {
       "id": "E13",
       "repository": "Resources-and-commercial-operations-engine",
-      "revision": "7a66e5cc0291fcdb3261052de2706379841f2fd4"
+      "revision": "ddd846e18432d30bf268fcb786e61e9cf5d00365"
     },
     "workspace": {
       "id": "E14",

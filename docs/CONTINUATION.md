@@ -2,7 +2,7 @@
 
 Single source of truth for where the completion assignment stands. Update at every checkpoint.
 
-_Last updated: 2026-11-15 (session 2, final)._
+_Last updated: 2026-11-15 (session 3: integration triage and re-pin)._
 
 ## State
 
@@ -28,6 +28,24 @@ Evidence (session 2):
   answers; editorial model port) — proposals only, `unavailable` without `ANTHROPIC_API_KEY`, adapter tested against a
   controlled local server only. Identity refresh-token rotation with reuse detection; the browser client rotates on every
   session restore. Worker housekeeping for host-delegated duties (E13 licence-expiry notices).
+
+## Session 3 (2026-11-15): PR triage, re-pin, engine features
+
+- **Engine PR backlog** resolved: DDM-010 inventory contracts closed (stale `neophilism/*` identity, CI dependency outside
+  the organization); boardroom legacy hardening merged (E04, E06, E12, E13); intake SI-35..39 drafts ported onto main
+  (intake #54) and closed; knowledge correction-impact PostgreSQL contention tests finished and merged.
+- **E05 main CI** had failed deterministically: `ubuntu-latest` became 26.04 (no `postgresql-client-16`; pg_dump 18 writes
+  `SET transaction_timeout`, rejected by PostgreSQL 16 on restore). Engines and PAM CI now pin `ubuntu-24.04` and assert
+  the client version.
+- **New engine features** (each with tests, in `docs/ENGINE_API.md`): E05 opt-in scheduled disposal execution; E04
+  page-level robots enforcement; E03 `sanitizedHtml`; E13 reservation commit/release only by the reserver or
+  `resources:admin`.
+- **PAM**: `engines.lock.json` moved to those mains (evidence, discovery, correspondence, intake, knowledge, processing,
+  release, resources). The correspondence screen loads a message's `sanitizedHtml` on demand and never renders the
+  original HTML (before, thread messages carried no HTML, so nothing was shown); every sandboxed frame now carries a
+  no-network CSP (sandbox="" alone blocked scripts but not remote images). No PAM screen exposes E05 retention/disposal.
+- **Local evidence on the new pins** (Node 24, PostgreSQL 16.15, CI tool set): `npm run check` 16/16; acceptance A–E 5/5;
+  browser tests 7/7 incl. a new sanitized-HTML assertion. The hosted services were not redeployed in this session.
 
 ## Environment facts for the next session
 
@@ -57,4 +75,6 @@ Evidence (session 2):
 
 1. Owner decisions: paid disk or S3 storage and a malware scanner for the hosted deployment; credentials for live
    provider verification (mail, OIDC, payments, Anthropic API key for model-backed agents).
-2. Remaining engine "not implemented" items (each engine's `docs/ENGINE_API.md`).
+2. Redeploy the hosted services from the new PAM main and intake `8892d68` (operator action).
+3. Remaining engine "not implemented" items (each engine's `docs/ENGINE_API.md`), e.g. E14 `projection.lagged` /
+   `alert.raised` (needs a decision on what a projection is versus PAM's "Needs attention" alerts).

@@ -103,10 +103,22 @@ function message(ctx, m) {
   el.append(h('p', {}, h('strong', { text: m.fromName ? `${m.fromName} <${m.fromAddr}>` : m.fromAddr }), h('span', { class: 'ws-muted', text: ` to ${(m.toAddrs ?? []).join(', ')} · ${m.state} · ${m.receivedAt ?? m.sentAt ?? m.createdAt ?? ''}` })));
   if (m.trust === 'untrusted_external_content') el.append(h('p', { class: 'ws-notice ws-notice--warn', text: 'External message: its content is unverified and is shown as text.' }));
   el.append(h('pre', { tabindex: '0', text: m.bodyText || '(no text part)' }));
-  if (m.bodyHtml || m.untrustedHtml) {
+  // Inbound mail may carry an HTML version. Only the engine's allow-listed rendering (`sanitizedHtml`) is ever shown, in a
+  // sandbox with no scripts and no network; the original HTML stays evidence (`untrustedHtml`) and is never rendered.
+  if (m.direction === 'inbound') {
     const holder = h('div', {});
-    el.append(h('details', {}, h('summary', { text: 'Show the HTML version in a sandbox (no scripts, no network)' }), holder));
-    el.querySelector('details').addEventListener('toggle', () => { if (!holder.firstChild) holder.append(sandboxedHtml(m.bodyHtml ?? m.untrustedHtml, `HTML version of the message from ${m.fromAddr}`)); }, { once: true });
+    const details = h('details', {}, h('summary', { text: 'Show the formatted version, if any (sanitized; no scripts, images or network)' }), holder);
+    el.append(details);
+    details.addEventListener('toggle', async () => {
+      if (holder.firstChild) return;
+      holder.append(h('p', { class: 'ws-muted', text: 'Loading…' }));
+      try {
+        const full = await api('correspondence', `/v1/messages/${m.id}`, { purpose: ctx.purpose });
+        holder.replaceChildren(typeof full.sanitizedHtml === 'string' && full.sanitizedHtml.trim() !== ''
+          ? sandboxedHtml(full.sanitizedHtml, `Formatted version of the message from ${m.fromAddr}`)
+          : h('p', { class: 'ws-muted', text: full.untrustedHtml ? 'The HTML version is kept as received but has no displayable content.' : 'This message has no HTML version.' }));
+      } catch (error) { holder.replaceChildren(h('p', { class: 'pam-form-error', text: `The formatted version could not be loaded: ${error?.message ?? error}` })); }
+    });
   }
   for (const a of m.attachments ?? []) el.append(h('p', {}, action(`Download ${a.filename}`, async () => { const res = await api('correspondence', `/v1/attachments/${a.id}`, { purpose: ctx.purpose, raw: true }); download(await res.blob(), a.filename); return `Downloaded ${a.filename}.`; })));
   if (m.state === 'draft') el.append(h('div', { class: 'pam-toolbar' }, action('Send', async () => { const d = await api('correspondence', `/v1/messages/${m.id}/send`, { purpose: ctx.purpose, body: {}, headers: { 'idempotency-key': `send-${m.id}-${m.revision}` } }); return `Send requested: ${DISPATCH_WORDS[d.state] ?? d.state}.`; })));
