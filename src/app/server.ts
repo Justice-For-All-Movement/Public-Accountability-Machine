@@ -22,7 +22,7 @@ import type { IntakeReport } from './intake.ts';
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.map': 'application/json' };
 const SECURITY_HEADERS = { 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer', 'content-security-policy': "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" };
 
-export type AppState = { lastIntake?: IntakeReport; lastHousekeeping?: { at: string; licencesExpiringNotified: number; errors: string[] }; lastRouter: RouterReport | null; lastWorkerError: string | null; workerPasses: number; startedAt: string };
+export type AppState = { lastIntake?: IntakeReport; lastHousekeeping?: { at: string; licencesExpiringNotified: number; conversationsWithoutResponse: number; errors: string[] }; lastRouter: RouterReport | null; lastWorkerError: string | null; workerPasses: number; startedAt: string };
 
 export function appRoutes(runtime: Runtime, state: AppState, extra: (runtime: Runtime) => Route[] = () => []): Route[] {
   return [
@@ -73,7 +73,7 @@ const inflight = new WeakMap<Runtime, Set<Promise<unknown>>>();
 export async function drainWorker(runtime: Runtime): Promise<void> { await Promise.all([...(inflight.get(runtime) ?? [])]); }
 const lastHousekeeping = new WeakMap<Runtime, number>();
 /**
- * Periodic duties engines leave to their host (E13: licence expiry notices). Runs at most once per
+ * Periodic duties engines leave to their host (E13 licence expiry notices, E03 no-response outcomes). Runs at most once per
  * PAM_HOUSEKEEPING_INTERVAL_MS (default one hour) under PAM's service identity, for every project of every provisioned
  * organization. A failure in one project is recorded and does not stop the others.
  */
@@ -82,23 +82,25 @@ async function housekeeping(runtime: Runtime, state: AppState): Promise<void> {
   const last = lastHousekeeping.get(runtime) ?? 0;
   if (Date.now() - last < every) return;
   lastHousekeeping.set(runtime, Date.now());
-  const resources = runtime.maybe('resources'); const identity = runtime.maybe('identity');
+  const resources = runtime.maybe('resources'); const identity = runtime.maybe('identity'); const correspondence = runtime.maybe('correspondence');
   if (resources === null || identity === null) return;
   const tenants = await runtime.sql.query<{ tenant_id: string; home_project_id: string }>(`select tenant_id, home_project_id from ${APP_SCHEMA}.tenants`);
-  let expiring = 0; const errors: string[] = [];
+  let expiring = 0, noResponse = 0; const errors: string[] = [];
   for (const t of tenants) {
     try {
       const home = await runtime.serviceContext({ tenantId: t.tenant_id, projectId: t.home_project_id });
       const projects = await identity.listProjects(home) as { id: string }[];
       for (const p of projects) {
         try {
-          const ctx = { ...(await runtime.serviceContext({ tenantId: t.tenant_id, projectId: p.id })), capabilities: ['resources:write', 'resources:read'] };
-          expiring += ((await resources.checkLicenseExpiry(ctx, {})) as { expiring: string[] }).expiring.length;
+          const base = await runtime.serviceContext({ tenantId: t.tenant_id, projectId: p.id });
+          expiring += ((await resources.checkLicenseExpiry({ ...base, capabilities: ['resources:write', 'resources:read'] }, {})) as { expiring: string[] }).expiring.length;
+          // E03: record "no response" on sent inquiries left unanswered (an investigation outcome, not a failure).
+          if (correspondence !== null) noResponse += ((await correspondence.sweepNoResponse({ ...base, capabilities: ['correspondence:write', 'correspondence:read'] }, { afterDays: Number(runtime.env.PAM_NO_RESPONSE_DAYS ?? 21) })) as { marked: string[] }).marked.length;
         } catch (error) { errors.push(`${t.tenant_id}/${p.id}: ${error instanceof Error ? error.message : String(error)}`); }
       }
     } catch (error) { errors.push(`${t.tenant_id}: ${error instanceof Error ? error.message : String(error)}`); }
   }
-  state.lastHousekeeping = { at: new Date().toISOString(), licencesExpiringNotified: expiring, errors: errors.slice(0, 20) };
+  state.lastHousekeeping = { at: new Date().toISOString(), licencesExpiringNotified: expiring, conversationsWithoutResponse: noResponse, errors: errors.slice(0, 20) };
 }
 
 export async function workerPass(runtime: Runtime, state: AppState, worker: string): Promise<void> {
