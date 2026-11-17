@@ -5,12 +5,12 @@
     "identity": {
       "id": "E01",
       "repository": "Identity-Authorization-and-Policy-Engine",
-      "revision": "c7c33fcccd7b14c49428416265c6d7a9171f0f5b"
+      "revision": "6baa80b525cc9a019216f62b7169ed205333e72f"
     },
     "intake": {
       "id": "E02",
       "repository": "Secure-Intake-Case-Workflow-Engine",
-      "revision": "8892d6856050e0b45aca102dca3c07ff08a3950f",
+      "revision": "b1f099fafabac4e22895217b4015dc9d6fc85e09",
       "external": true
     },
     "correspondence": {
@@ -36,12 +36,12 @@
     "knowledge": {
       "id": "E07",
       "repository": "Knowledge-and-verification-engine",
-      "revision": "697f868b1f48e6a9fa47e6cb7e303417df3b2cb6"
+      "revision": "3cd672d5b7db9dad730d6040f6c27889fd75daee"
     },
     "investigation": {
       "id": "E08",
       "repository": "Factual-investigation-engine",
-      "revision": "d46c7da950b4ac81d9137d786a96ef173fae692b"
+      "revision": "232a339e0e4d6f1e90f06b7aa84b03e6386d0b3a"
     },
     "editorial": {
       "id": "E09",
