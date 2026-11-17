@@ -75,6 +75,6 @@ Evidence (session 2):
 
 1. Owner decisions: paid disk or S3 storage and a malware scanner for the hosted deployment; credentials for live
    provider verification (mail, OIDC, payments, Anthropic API key for model-backed agents).
-2. Redeploy the hosted services from the new PAM main and intake `8892d68` (operator action).
+2. Redeploy the hosted services from the new PAM main and intake `b1f099f` (operator action).
 3. Remaining engine "not implemented" items (each engine's `docs/ENGINE_API.md`), e.g. E14 `projection.lagged` /
    `alert.raised` (needs a decision on what a projection is versus PAM's "Needs attention" alerts).
