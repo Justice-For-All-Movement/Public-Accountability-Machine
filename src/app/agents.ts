@@ -33,7 +33,7 @@ async function askOnce(a: ActionContext, model: ModelPort | null, request: Model
   return answer;
 }
 const usage = (answer: ModelAnswer): Json => ({ model: answer.model, inputTokens: answer.inputTokens, outputTokens: answer.outputTokens });
-const estimate = () => ({ category: 'model.proposal', amount: 4000, unit: 'token' });
+const estimate = () => ({ category: 'model.proposal', amount: 4000, unit: 'tokens_in' });
 
 export function loadAgentActions(runtime: Runtime, model: ModelPort | null): Record<string, ActionDefinition> {
   const processing = investigationProcessingPort((short) => runtime.get(short));
@@ -72,6 +72,108 @@ export function loadAgentActions(runtime: Runtime, model: ModelPort | null): Rec
           ...(typeof input.caseId === 'string' ? { caseId: input.caseId } : {}), idempotencyKey: `e00-${a.task.id}-claims` }) as Any[];
         return { output: { proposed: proposals.length, droppedUnquotable: dropped, proposals: proposals.map((p) => p.ref), usage: usage(answer) } as Json,
           summary: `Proposed ${proposals.length} claim(s) from ${evidenceRef} for human review; ${dropped} dropped because the quotation was not found in the source.`, refs: [evidenceRef, ...proposals.map((p) => String(p.ref))] };
+      },
+    },
+    'agent.extract_records': {
+      description: 'Read a processed list, report or bulletin and propose one record per person (or other entity) it mentions, with requested attributes and claims, each tied to an exact quotation; dates stated in another calendar are converted deterministically (input: evidenceRef, attributes[{key, description, kind: text|number|date}], caseId?, entityType?, focus?, segmentFrom?, segmentTo?).',
+      requires: ['processing:read', 'knowledge:propose', 'knowledge:read'],
+      estimate: () => ({ category: 'model.proposal', amount: 12000, unit: 'tokens_in' }),
+      async run(a) {
+        const evidenceRef = str(a.task.input, 'evidenceRef'); const input = a.task.input as Any;
+        const entityType = typeof input.entityType === 'string' && input.entityType !== '' ? input.entityType : 'person';
+        const wanted = Array.isArray(input.attributes) ? (input.attributes as Any[]).slice(0, 20).filter((x) => typeof x?.key === 'string' && /^[A-Za-z][A-Za-z0-9_]{0,40}$/.test(x.key))
+          .map((x) => ({ key: String(x.key), description: String(x.description ?? x.key).slice(0, 300), kind: ['text', 'number', 'date'].includes(x.kind) ? String(x.kind) : 'text' })) : [];
+        const source = await processing.getText(a.ctx, evidenceRef) as Any;
+        if (!source.available) throw new DomainError('unavailable', `No text is available for ${evidenceRef}: ${source.reason}`);
+        const all = source.segments as { text: string; selector: Any }[];
+        const from = Number.isSafeInteger(input.segmentFrom) ? Math.max(0, input.segmentFrom as number) : 0;
+        const to = Number.isSafeInteger(input.segmentTo) ? Math.min(all.length, input.segmentTo as number) : all.length;
+        // A long document is split into windows of whole segments; each window becomes its own task (one model answer each).
+        const WINDOW = 12_000;
+        const size = all.slice(from, to).reduce((n, s) => n + s.text.length, 0);
+        if (size > WINDOW && to - from > 1) {
+          const windows: [number, number][] = []; let start = from, chars = 0;
+          for (let i = from; i < to; i++) { const len = (all[i] as { text: string }).text.length; if (chars > 0 && chars + len > WINDOW) { windows.push([start, i]); start = i; chars = 0; } chars += len; }
+          windows.push([start, to]);
+          await a.spawn(windows.map(([f, t], n) => ({ key: `${a.task.key}-w${n + 1}`, title: `Extract records from ${evidenceRef} (segments ${f + 1}–${t})`, action: 'agent.extract_records', input: { ...input, segmentFrom: f, segmentTo: t } as Json, dependsOn: [a.task.key] })));
+          return { output: { windows: windows.length, segments: to - from } as Json, summary: `Split ${evidenceRef} into ${windows.length} windows for extraction.`, refs: [evidenceRef] };
+        }
+        const segments = all.slice(from, to);
+        const dateFields = { calendar: { type: 'string', enum: ['gregory', 'persian', 'islamic-civil', 'islamic-umalqura', 'coptic', 'ethiopic', 'indian', 'buddhist', 'roc', 'unknown'] }, year: { type: 'integer' }, month: { type: 'integer' }, day: { type: 'integer' }, weekday: text };
+        const answer = await askOnce(a, model, {
+          instruction: [
+            `List every ${entityType} that the document below names as an individual, one entry per mention. Copy names exactly as written, including any alternative name in parentheses.`,
+            'For each, give the attributes requested below only when the document states them, each with one quotation copied exactly from the document that states it. Leave out an attribute the document does not state; never infer or complete one.',
+            'For a date, give the calendar the document uses, and the year, month number and day exactly as stated in that calendar, plus the weekday in English if the document states one (otherwise an empty string). Do not convert dates between calendars. For an attribute that is not a date, give the date as calendar "unknown" with year, month and day 0.',
+            'Also give one neutral sentence of what the document says about the entry, with one quotation copied exactly from the document. At most 60 entries.',
+            `Requested attributes: ${wanted.map((w) => `${w.key} (${w.kind}): ${w.description}`).join('; ') || 'none'}.`,
+            ...(typeof input.focus === 'string' && input.focus !== '' ? [`Investigators' note (written by staff): ${input.focus.slice(0, 1000)}`] : []),
+          ].join('\n'),
+          material: [{ label: `document ${evidenceRef} (segments ${from + 1}–${to})`, text: segments.map((s) => s.text).join('\n') }],
+          schema: obj({ entries: list(obj({ name: text, nameQuote: text, aliases: list(text), statement: text, statementQuote: text,
+            attributes: list(obj({ key: text, value: text, quote: text, date: obj(dateFields) })) })) }),
+        });
+        const knowledge = runtime.get('knowledge');
+        const find = (quote: string): { segment: { text: string; selector: Any }; start: number } | null => {
+          const q = quote.trim(); if (q.length < 3) return null;
+          for (const segment of segments) { const start = segment.text.indexOf(q); if (start >= 0) return { segment, start }; }
+          return null;
+        };
+        const evidenceFor = (quote: string): Any | null => {
+          const hit = find(quote); if (hit === null) return null;
+          const q = quote.trim();
+          return { evidenceRef, representationRef: source.derivativeRef, stance: 'supports', sourceType: 'secondary',
+            selector: { kind: 'text', quote: hit.segment.text, ...(typeof hit.segment.selector.segmentId === 'string' ? { segmentId: hit.segment.selector.segmentId } : {}), ...(typeof hit.segment.selector.page === 'number' ? { page: hit.segment.selector.page } : {}) },
+            excerpt: { start: hit.start, end: hit.start + q.length, quote: q } };
+        };
+        const items: Any[] = []; let droppedEntries = 0, droppedAttributes = 0, dateIssues = 0;
+        for (const e of ((answer.output as Any).entries as Any[]).slice(0, 60)) {
+          const name = String(e.name ?? '').trim(); const nameQuote = String(e.nameQuote ?? '').trim();
+          // An entry is kept only when the name itself is written in the quotation and the quotation is in the document.
+          const nameEvidence = name.length >= 2 && nameQuote.includes(name) ? evidenceFor(nameQuote) : null;
+          if (nameEvidence === null) { droppedEntries++; continue; }
+          const attributes: Any = {}; const evidence: Any[] = [nameEvidence];
+          for (const at of (e.attributes as Any[] ?? [])) {
+            const spec = wanted.find((w) => w.key === at.key); const quote = String(at.quote ?? '').trim();
+            const ev = spec === undefined ? null : evidenceFor(quote);
+            if (spec === undefined || ev === null) { droppedAttributes++; continue; }
+            if (spec.kind === 'date') {
+              const d = at.date as Any;
+              if (d === undefined || d === null || d.calendar === 'unknown') { attributes[`${spec.key}Stated`] = quote.slice(0, 200); }
+              else {
+                try {
+                  const c = knowledge.convertDate(a.ctx, { calendar: d.calendar, year: d.year, month: d.month, day: d.day, ...(typeof d.weekday === 'string' && d.weekday.trim() !== '' ? { weekday: d.weekday.trim().toLowerCase() } : {}) }) as Any;
+                  attributes[spec.key] = c.gregorian;
+                  if (d.calendar !== 'gregory') attributes[`${spec.key}Stated`] = `${d.year}-${d.month}-${d.day} (${d.calendar})`;
+                  if (c.weekdayMatches === false) { attributes[`${spec.key}Issue`] = `The source states ${c.statedWeekday}, but ${c.gregorian} was a ${c.weekday}`; dateIssues++; }
+                } catch (error) {
+                  attributes[`${spec.key}Stated`] = quote.slice(0, 200); attributes[`${spec.key}Issue`] = `Not converted: ${error instanceof Error ? error.message.slice(0, 160) : 'invalid date'}`; dateIssues++;
+                }
+              }
+            } else if (spec.kind === 'number') {
+              const n = Number(String(at.value).replace(/[^\d.-]/g, ''));
+              if (Number.isFinite(n) && String(at.value).trim() !== '' && quote.includes(String(at.value).trim())) attributes[spec.key] = n; else { droppedAttributes++; continue; }
+            } else {
+              const v = String(at.value ?? '').trim().slice(0, 300);
+              if (v === '') { droppedAttributes++; continue; }
+              attributes[spec.key] = v;
+            }
+            if (!evidence.some((x) => x.excerpt.quote === ev.excerpt.quote)) evidence.push(ev);
+          }
+          const statementEvidence = evidenceFor(String(e.statementQuote ?? ''));
+          if (statementEvidence !== null && !evidence.some((x) => x.excerpt.quote === statementEvidence.excerpt.quote)) evidence.push(statementEvidence);
+          const statement = String(e.statement ?? '').trim().slice(0, 2000) || `${name} is named in ${evidenceRef}.`;
+          const aliases = [...new Set((e.aliases as unknown[] ?? []).map((x) => String(x).trim()).filter((x) => x.length >= 2 && x !== name && segments.some((s) => s.text.includes(x))))].slice(0, 20);
+          items.push({ entity: { entityType, name: name.slice(0, 500), aliases, attributes }, claims: [{ text: statement, claimType: 'allegation', evidence: evidence.slice(0, 20) }] });
+        }
+        const made: Any[] = [];
+        for (let i = 0; i < items.length; i += 100) {
+          made.push(...await knowledge.proposeRecords(a.ctx, { origin: { kind: 'model', ref: evidenceRef, label: answer.model }, items: items.slice(i, i + 100),
+            ...(typeof input.caseId === 'string' ? { caseId: input.caseId } : {}), idempotencyKey: `e00-${a.task.id}-records-${i}` }) as Any[]);
+        }
+        return { output: { proposed: made.length, droppedEntries, droppedAttributes, dateIssues, segments: [from, to], usage: usage(answer) } as Json,
+          summary: `Proposed ${made.length} record(s) from ${evidenceRef} (segments ${from + 1}–${to}) for human review; ${droppedEntries} entries and ${droppedAttributes} attributes dropped because their quotation was not found; ${dateIssues} date issue(s) recorded.`,
+          refs: [evidenceRef, ...made.map((p) => String(p.ref))] };
       },
     },
     'agent.propose_questions': {

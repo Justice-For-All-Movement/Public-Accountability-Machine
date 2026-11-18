@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { withApp, browserSkip, axe, settled } from './helpers.ts';
 import type { Page } from './helpers.ts';
 
-export const SCREENS = ['overview', 'objectives', 'intake', 'evidence', 'investigations', 'knowledge', 'correspondence', 'editorial', 'production', 'rights', 'release', 'discovery', 'resources', 'audit', 'admin', 'search'];
+export const SCREENS = ['overview', 'objectives', 'intake', 'evidence', 'investigations', 'knowledge', 'records', 'correspondence', 'editorial', 'production', 'rights', 'release', 'discovery', 'resources', 'audit', 'admin', 'search'];
 
 async function visit(page: Page, url: string, screen: string): Promise<void> {
   await page.goto(`${url}/${screen}`);

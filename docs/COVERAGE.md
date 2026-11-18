@@ -7,7 +7,8 @@ acceptance test on the composed application · **live** verified against a real 
 
 Acceptance tests (in `tests/acceptance/`): **A** intake → findings and deliverables, two-organization isolation ·
 **B** research question → correspondence → verification · **C** investigation → finished creative works ·
-**D** rights, private release, correction and withdrawal · **E** reliability and resource control.
+**D** rights, private release, correction and withdrawal · **E** reliability and resource control ·
+**F** records across sources (extraction with quotations and calendars → identity decisions → roster).
 
 | Req | Implementation | Evidence | Status | Gaps / notes |
 |---|---|---|---|---|
@@ -61,6 +62,25 @@ Acceptance tests (in `tests/acceptance/`): **A** intake → findings and deliver
 - E02 hardening ported from SI-35..39 drafts (transport redirects, create-only S3 writes, envelope validation,
   undeclared answer keys, `.dockerignore`, `npm ci`). Knowledge correction-impact PostgreSQL contention tests.
 - PAM CI pinned to `ubuntu-24.04` with an asserted PostgreSQL 16 client (26.04 runners ship no client 16).
+
+## Added in session 4 (records across sources)
+
+- E07 record linkage (`feature/cross-source-linkage`, E07 PR #45): record proposals (one entity plus its quoted claims),
+  bulk human review, read-only candidate matches across spellings, scripts and romanizations (Arabic-script folding and
+  transliteration; configurable equivalences), human identity decisions in batches, a roster that keeps every
+  disagreeing value with its records, incident grouping by place and day, and deterministic ICU calendar conversion
+  with weekday checks. Tests: E07 `tests/engine-linkage.test.ts`.
+- PAM `agent.extract_records`: model-backed, one record proposal per mention, every name, attribute and statement tied to
+  a verbatim quotation (others dropped and counted), dates converted by E07, long documents split into windowed tasks.
+  Acceptance **F** (`tests/acceptance/f-records-across-sources.test.ts`) runs it on the composed application against a
+  controlled local model server, then exercises human review, a candidate pair, the roster and incidents.
+- PAM screen **Records across sources** (`web/js/screens/records.js`), covered by the browser screen test (axe, empty
+  states, 320 px). The Knowledge screen's proposal panel now lists pending proposals; it had filtered on a state value
+  (`proposed`) that E07 never uses, so it always showed none.
+- Model-backed actions reserved budget in a unit E13 rejects (`token`); they now reserve `tokens_in`.
+- E06 built-in language profiles for Arabic-script languages and Hebrew (E06 PR #22), so OCR `auto` reads Arabic-script
+  pages with matching data. The container image takes `OCR_LANGUAGES` as a build argument.
+- Guide: `docs/RECORDS_ACROSS_SOURCES.md`.
 
 ## Open items (honest list)
 

@@ -11,6 +11,7 @@ export const SCREENS = [
   { id: 'evidence', title: 'Evidence', purpose: 'research', render: lazy(() => import('./evidence.js')) },
   { id: 'investigations', title: 'Investigations', purpose: 'research', render: lazy(() => import('./investigations.js')) },
   { id: 'knowledge', title: 'Knowledge', purpose: 'research', render: lazy(() => import('./knowledge.js')) },
+  { id: 'records', title: 'Records across sources', purpose: 'research', render: lazy(() => import('./records.js')) },
   { id: 'correspondence', title: 'Correspondence', purpose: 'correspondence', render: lazy(() => import('./correspondence.js')) },
   { id: 'editorial', title: 'Editorial', purpose: 'editorial', render: lazy(() => import('./editorial.js')) },
   { id: 'production', title: 'Production', purpose: 'production', render: lazy(() => import('./production.js')) },
