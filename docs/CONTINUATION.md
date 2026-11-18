@@ -57,7 +57,7 @@ Purpose: an investigation in which many sources list the same people under diffe
 - **E06** Arabic-script and Hebrew language profiles on branch `feature/arabic-script-languages` (PR #22).
 - **PAM**: `agent.extract_records`, the **Records across sources** screen, acceptance **F**, the fix for the Knowledge
   proposals panel, `tokens_in` budget estimates for model actions, and an `OCR_LANGUAGES` build argument in the Dockerfile.
-- `engines.lock.json` is re-pinned to the E07 and E06 merge commits once their CI passes.
+- `engines.lock.json` is re-pinned to the E07 merge commit (993e688) and the E06 merge commit (8057d6d) after CI passed on both. With those pins: `npm run check` 16/16 against PostgreSQL 16, acceptance A–F 6/6, browser 7/7.
 - Local environment for this session: Node 24 at `/opt/node24/bin`; PostgreSQL 16; tools installed with apt (exiftool,
   fluidsynth, espeak-ng, sox, rsvg, imagemagick, libreoffice, apertium, tesseract fas/ara/osd). Playwright 1.63.0 installed
   `--no-save` and driving the system Chrome (`/usr/bin/google-chrome`) through a preload script, because the Playwright CDN
