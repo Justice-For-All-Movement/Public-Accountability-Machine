@@ -2,7 +2,7 @@
 
 Single source of truth for where the completion assignment stands. Update at every checkpoint.
 
-_Last updated: 2026-11-15 (session 3: integration triage and re-pin)._
+_Last updated: 2026-11-18 (session 4: records across sources)._
 
 ## State
 
@@ -46,6 +46,22 @@ Evidence (session 2):
   no-network CSP (sandbox="" alone blocked scripts but not remote images). No PAM screen exposes E05 retention/disposal.
 - **Local evidence on the new pins** (Node 24, PostgreSQL 16.15, CI tool set): `npm run check` 16/16; acceptance A–E 5/5;
   browser tests 7/7 incl. a new sanitized-HTML assertion. The hosted services were not redeployed in this session.
+
+## Session 4 (2026-11-18): records across sources
+
+Purpose: an investigation in which many sources list the same people under different spellings, scripts and calendars
+(guide: `docs/RECORDS_ACROSS_SOURCES.md`). Research engines only; no media-generation work.
+
+- **E07** record linkage on branch `feature/cross-source-linkage` (PR #45): record proposals, bulk review, candidate
+  matches, identity-decision batches, roster, incidents and calendar conversion. Tested in `tests/engine-linkage.test.ts`.
+- **E06** Arabic-script and Hebrew language profiles on branch `feature/arabic-script-languages` (PR #22).
+- **PAM**: `agent.extract_records`, the **Records across sources** screen, acceptance **F**, the fix for the Knowledge
+  proposals panel, `tokens_in` budget estimates for model actions, and an `OCR_LANGUAGES` build argument in the Dockerfile.
+- `engines.lock.json` is re-pinned to the E07 merge commit (993e688) and the E06 merge commit (8057d6d) after CI passed on both. With those pins: `npm run check` 16/16 against PostgreSQL 16, acceptance A–F 6/6, browser 7/7.
+- Local environment for this session: Node 24 at `/opt/node24/bin`; PostgreSQL 16; tools installed with apt (exiftool,
+  fluidsynth, espeak-ng, sox, rsvg, imagemagick, libreoffice, apertium, tesseract fas/ara/osd). Playwright 1.63.0 installed
+  `--no-save` and driving the system Chrome (`/usr/bin/google-chrome`) through a preload script, because the Playwright CDN
+  is blocked here.
 
 ## Environment facts for the next session
 
