@@ -1,6 +1,22 @@
 // The signed-in person's own account security: two-factor sign-in with an authenticator app (identity engine E01).
 import { api } from '../api.js';
+import qrcode from '../vendor/qrcode.mjs';
 import { h, form, section, region, dl, action, announce } from '../ui.js';
+
+const SVG = 'http://www.w3.org/2000/svg';
+/** The otpauth link as a QR code, drawn as SVG in the page (nothing is sent anywhere to make it). */
+export function qrSvg(text, label) {
+  const qr = qrcode(0, 'M'); qr.addData(text); qr.make();
+  const n = qr.getModuleCount(), margin = 4, size = n + margin * 2;
+  const svg = document.createElementNS(SVG, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${size} ${size}`); svg.setAttribute('width', '220'); svg.setAttribute('height', '220');
+  svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', label); svg.setAttribute('class', 'pam-qr');
+  const bg = document.createElementNS(SVG, 'rect'); bg.setAttribute('width', String(size)); bg.setAttribute('height', String(size)); bg.setAttribute('fill', '#ffffff'); svg.append(bg);
+  let d = '';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) d += `M${c + margin} ${r + margin}h1v1h-1z`;
+  const path = document.createElementNS(SVG, 'path'); path.setAttribute('d', d); path.setAttribute('fill', '#000000'); svg.append(path);
+  return svg;
+}
 
 export async function render(el, ctx) {
   const { el: box, body: boxBody } = region('Two-factor sign-in', 2, 'With two-factor sign-in on, signing in needs your password and a six-digit code from an authenticator app on your phone. Keep the recovery codes somewhere safe: each one replaces a code once if you lose the phone.');
@@ -18,7 +34,9 @@ export async function render(el, ctx) {
     setup.append(action('Start setup', async () => {
       const out = await call('/v1/mfa/enroll', {});
       setup.replaceChildren(
-        h('p', { text: 'Add an account in your authenticator app with this setup key (or open the link on the phone). Then enter the six-digit code the app shows.' }),
+        h('p', { text: 'Scan this QR code with your authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, Authy …). Then enter the six-digit code the app shows.' }),
+        h('div', { class: 'pam-qr-box' }, qrSvg(out.otpauthUri, 'QR code for adding this account to an authenticator app')),
+        h('p', { text: 'Cannot scan? Type this setup key into the app instead:' }),
         dl([['Setup key', out.secret]]),
         h('p', {}, h('a', { href: out.otpauthUri, text: 'Open in authenticator app' })),
         form({ legend: 'Confirm setup', submit: 'Confirm', fields: [{ name: 'code', label: 'Six-digit code from the app', required: true, autocomplete: 'one-time-code' }],

@@ -14,6 +14,8 @@ test('two-factor sign-in: setup with an authenticator code, recovery codes shown
     await settled(page);
     await page.getByText('Off', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'Start setup' }).click();
+    await page.locator('svg.pam-qr').waitFor();
+    if (process.env.PAM_QR_SHOT) await page.locator('.pam-qr-box').screenshot({ path: process.env.PAM_QR_SHOT });
     const secret = (await page.locator('dt:text-is("Setup key") + dd').innerText()).trim();
     assert.match(secret, /^[A-Z2-7]{32}$/);
     assert.deepEqual(await axe(page), [], 'the setup view is accessible');

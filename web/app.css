@@ -116,3 +116,7 @@ input, select, textarea, button { font: inherit; }
 .ws-timeline__filters > * { min-width: 0; max-width: 100%; }
 .ws-timeline__filters select, .ws-timeline__filters input { width: 100%; }
 .ws-timeline__scroll { max-width: 100%; }
+
+/* Two-factor setup: the QR code always sits on white with a quiet zone so phone cameras read it in dark mode too. */
+.pam-qr-box { display: inline-block; padding: 8px; background: #ffffff; border-radius: 8px; margin: 8px 0; }
+.pam-qr { display: block; max-width: 100%; height: auto; shape-rendering: crispEdges; }
