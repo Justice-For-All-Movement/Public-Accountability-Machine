@@ -107,6 +107,8 @@ type RunRow = { id: string; tenant_id: string; project_id: string; purpose: stri
 const runView = (r: RunRow): Json => ({ id: r.id, purpose: r.purpose, tools: r.tools, command: r.command, environment: r.environment, parentRunId: r.parent_run_id, actorId: r.actor_id, actorKind: r.actor_kind, build: r.build,
   startedAt: r.started_at.toISOString(), finishedAt: r.finished_at?.toISOString() ?? null, exitCode: r.exit_code, outcome: r.outcome, summary: r.summary, outputRef: r.output_ref, logAttemptId: r.log_attempt_id, logError: r.log_error });
 const OUTCOMES = ['succeeded', 'partial', 'zero_result', 'failed', 'refused', 'access_restricted', 'unavailable', 'uncertain', 'cancelled'];
+/** The investigation engine's limit for one attempt's detail. */
+const LOG_DETAIL_MAX = 4000;
 const KINDS = ['search', 'acquisition', 'contact', 'processing', 'knowledge', 'verification', 'other'];
 
 /** Registers a tool by its exact source. The bytes are preserved in evidence storage; the SHA-256 identifies the version. */
@@ -165,7 +167,16 @@ export async function finishRun(runtime: Runtime, ctx: ServiceContext, id: strin
       const detail = [`Research run ${run.id} (standard ${STANDARD_VERSION}). ${input.summary}`, `Started ${run.started_at.toISOString()}, finished ${finishedAt.toISOString()} (UTC); exit ${input.exitCode}; by ${run.actor_kind} ${run.actor_id}; PAM build ${run.build}.`,
         `Command: ${run.command}`, `Tools: ${tools.map((t) => `${t.name}${t.version ? ` ${t.version}` : ''} sha256 ${t.sha256}${t.evidence_ref ? ` source ${t.evidence_ref}` : t.source_note ? ` (${t.source_note})` : ''}`).join('; ')}`,
         `Environment: ${JSON.stringify(run.environment)}`, outputRef ? `Complete output: ${outputRef}` : 'No output was submitted.'].join('\n');
-      const a = await runtime.get('investigation').recordAttempt(ctx, log, { kind, target: run.purpose.slice(0, 2000), method: run.command.slice(0, 500), outcome, detail: detail.slice(0, 20_000), refs, idempotencyKey: `research-run-${run.id}` }) as { id: string };
+      // A log entry holds at most 4,000 characters. A longer account is preserved whole in evidence storage and the
+      // entry says so and links it; nothing is cut silently.
+      let entry = detail;
+      if (detail.length > LOG_DETAIL_MAX) {
+        const full = (await runtime.get('evidence').accept(ctx, { bytes: new TextEncoder().encode(detail), mediaType: 'text/plain', filename: `${run.id}-record.txt`, origin: { kind: 'upload', label: `Full record of research run ${run.id}` } as Json, idempotencyKey: `research-record-${run.id}` }) as { ref: string }).ref;
+        refs.unshift(full);
+        const note = `\n[Shortened for the log: the complete record of this run (${detail.length} characters) is ${full}; also GET /api/app/v1/research/runs/${run.id}.]`;
+        entry = detail.slice(0, LOG_DETAIL_MAX - note.length) + note;
+      }
+      const a = await runtime.get('investigation').recordAttempt(ctx, log, { kind, target: run.purpose.slice(0, 2000), method: run.command.slice(0, 500), outcome, detail: entry, refs: refs.slice(0, 50), idempotencyKey: `research-run-${run.id}` }) as { id: string };
       attemptId = a.id;
     }
   } catch (error) { logError = error instanceof Error ? error.message : String(error); }

@@ -61,6 +61,13 @@ test('G: research record — tools, runs, journal, enforcement and append-only s
       assert.match(entry.detail, new RegExp(tool.json.sha256)); assert.match(entry.detail, /python3 scraper\.py --page 1/);
       assert.ok(entry.refs.includes(finished.json.outputRef) && entry.refs.includes(tool.json.evidenceRef));
 
+      // 5b. A run whose account exceeds a log entry's 4,000 characters is preserved whole in evidence and linked.
+      const long = await call('/api/app/v1/research/runs', { body: { purpose: 'Long command', tools: [tool.json.sha256], command: `python3 scraper.py ${'--page 1 '.repeat(800)}` } });
+      const longDone = await call(`/api/app/v1/research/runs/${long.json.id}/finish`, { body: { exitCode: 0, summary: 'Long run.' } });
+      assert.equal(longDone.json.logError, null); assert.ok(longDone.json.logAttemptId);
+      const longEntry = (await stack.runtime.get('investigation').listAttempts(await org.as(org.owner, 'research'), run.json.logInvestigationId) as { id: string; detail: string; refs: string[] }[]).find((a) => a.id === longDone.json.logAttemptId)!;
+      assert.ok(longEntry.detail.length <= 4000); assert.match(longEntry.detail, /complete record of this run/); assert.match(longEntry.refs[0] as string, /^E05:/);
+
       // 6. A finished run cannot carry writes or be finished again.
       assert.equal((await call('/api/e/evidence/v1/evidence/accept', { body: upload('late write'), headers: { 'x-pam-run': run.json.id } })).status, 409);
       assert.equal((await call(`/api/app/v1/research/runs/${run.json.id}/finish`, { body: { exitCode: 0, summary: 'again' } })).status, 409);
