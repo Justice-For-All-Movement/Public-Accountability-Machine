@@ -71,6 +71,18 @@ export async function signIn(login, password, code) {
   await loadDirectory();
   return state.directory;
 }
+/** Signs this device in with a one-time link created on another signed-in device (the QR code on Account security). */
+export async function signInWithLink(token) {
+  const out = await publicPost('/v1/sessions/device-links/redeem', { token });
+  state.refreshToken = out.refreshToken; state.tokens.clear();
+  await loadDirectory();
+  return state.directory;
+}
+/** Creates a one-time, two-minute link that signs another device in as the current person. */
+export async function createDeviceLink() {
+  if (state.refreshToken === null) throw new ApiError(401, { code: 'unauthenticated', message: 'Not signed in' });
+  return publicPost('/v1/sessions/device-links', { refreshToken: state.refreshToken });
+}
 export async function loadDirectory() {
   state.directory = await publicPost('/v1/sessions/directory', { refreshToken: state.refreshToken });
   const orgs = state.directory.organizations ?? [];

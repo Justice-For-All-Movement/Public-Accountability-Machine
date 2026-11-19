@@ -43,3 +43,29 @@ test('two-factor sign-in: setup with an authenticator code, recovery codes shown
     assert.deepEqual(errors.filter((e) => !e.includes('/v1/sessions')), []);
   });
 });
+
+test('sign in on a phone: the Account screen shows a QR code; opening the link signs a fresh device in once', { skip, timeout: 300_000 }, async () => {
+  await withApp(async (app) => {
+    const { page, errors } = await app.page();
+    await app.signIn(page);
+    await page.goto(`${app.url}/account`);
+    await settled(page);
+    await page.getByRole('button', { name: 'Show a sign-in QR code' }).click();
+    await page.locator('svg[aria-label="QR code that signs your phone in to PAM"]').waitFor();
+    await page.getByText(/Expires in \d+ s\./).waitFor();
+    assert.deepEqual(await axe(page), [], 'the sign-in code view is accessible');
+    // The same one-time link the QR code carries, created for the owner's session, opened on a separate "phone".
+    const identity = app.stack.runtime.get('identity');
+    const link = await identity.createDeviceLink(app.org.owner.refreshToken) as { token: string };
+    const phone = await app.page({ width: 390, height: 844 });
+    await phone.page.goto(`${app.url}/link#t=${encodeURIComponent(link.token)}`);
+    await phone.page.locator('#pam-nav:not([hidden])').waitFor();
+    assert.equal(new URL(phone.page.url()).pathname, '/overview');
+    assert.equal(new URL(phone.page.url()).hash, '', 'the token is removed from the address bar');
+    // A second phone with the same link is refused and lands on the sign-in form with an explanation.
+    const other = await app.page({ width: 390, height: 844 });
+    await other.page.goto(`${app.url}/link#t=${encodeURIComponent(link.token)}`);
+    await other.page.getByText(/That sign-in code did not work/).waitFor();
+    assert.deepEqual(errors, []); assert.deepEqual(phone.errors, []);
+  });
+});

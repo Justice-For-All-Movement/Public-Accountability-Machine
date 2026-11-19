@@ -1,5 +1,5 @@
 // The signed-in person's own account security: two-factor sign-in with an authenticator app (identity engine E01).
-import { api } from '../api.js';
+import { api, createDeviceLink } from '../api.js';
 import qrcode from '../vendor/qrcode.mjs';
 import { h, form, section, region, dl, action, announce } from '../ui.js';
 
@@ -18,7 +18,31 @@ export function qrSvg(text, label) {
   return svg;
 }
 
+function deviceSection() {
+  const { el, body } = region('Sign in on your phone', 2, 'Show a code here and scan it with your phone camera: the phone opens PAM signed in as you, in its own session that you can sign out separately. The code works once and expires after two minutes. Only scan it on a phone you own.');
+  const holder = h('div', {}); body.append(holder);
+  let timer = null;
+  const show = async () => {
+    const link = await createDeviceLink();
+    const url = `${location.origin}/link#t=${encodeURIComponent(link.token)}`;
+    const left = h('p', { class: 'pam-intro', role: 'status' });
+    holder.replaceChildren(h('div', { class: 'pam-qr-box' }, qrSvg(url, 'QR code that signs your phone in to PAM')), left,
+      action('Show a new code', async () => { await show(); return 'New code shown.'; }));
+    clearInterval(timer);
+    const tick = () => {
+      const s = Math.max(0, Math.round((Date.parse(link.expiresAt) - Date.now()) / 1000));
+      left.textContent = s > 0 ? `Expires in ${s} s.` : 'This code has expired.';
+      if (s === 0) { clearInterval(timer); holder.querySelector('.pam-qr-box')?.remove(); }
+    };
+    tick(); timer = setInterval(tick, 1000);
+    return 'Scan the code with your phone camera.';
+  };
+  holder.append(action('Show a sign-in QR code', show));
+  return el;
+}
+
 export async function render(el, ctx) {
+  el.append(deviceSection());
   const { el: box, body: boxBody } = region('Two-factor sign-in', 2, 'With two-factor sign-in on, signing in needs your password and a six-digit code from an authenticator app on your phone. Keep the recovery codes somewhere safe: each one replaces a code once if you lose the phone.');
   el.append(box);
   const body = h('div', {}); boxBody.append(body);

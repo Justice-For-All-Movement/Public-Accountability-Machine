@@ -139,6 +139,19 @@ session.onSessionChange(() => { if (!session.session().signedIn && app.screen !=
 
 (async () => {
   try { app.status = await session.appApi('/v1/status'); } catch { app.status = null; }
+  // A sign-in link from another device (QR code): the token is in the URL fragment, which is never sent to a server log.
+  if (location.pathname === '/link') {
+    const token = new URLSearchParams(location.hash.slice(1)).get('t');
+    history.replaceState(null, '', '/overview');
+    if (token) {
+      try { await session.signInWithLink(token); announce('Signed in.'); await route(); return; }
+      catch (error) {
+        signInView();
+        main.querySelector('.pam-signin__status')?.append(h('p', { class: 'ws-notice ws-notice--warn', text: 'That sign-in code did not work: it may have expired (codes last two minutes) or been used already. Show a new code on the other device, or sign in here.' }));
+        return;
+      }
+    }
+  }
   try { await session.restore(); } catch (error) { clear(main); renderError(main, error, () => location.reload()); return; }
   await route();
 })();
