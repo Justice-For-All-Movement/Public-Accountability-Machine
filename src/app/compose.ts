@@ -14,6 +14,7 @@ import * as adapters from './adapters.ts';
 import { modelFromEnv } from './model.ts';
 import type { ModelPort } from './model.ts';
 import { editorialModelPort } from './agents.ts';
+import { migrateResearch, recordedAction } from './research.ts';
 import type { OrchestrationEngine } from '../orchestration/index.ts';
 
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -86,6 +87,8 @@ export async function migrateApp(sql: Sql): Promise<void> {
   await sql.query(`create index if not exists alerts_scope on ${APP_SCHEMA}.alerts (tenant_id, project_id, at desc)`);
   await sql.query(`create table if not exists ${APP_SCHEMA}.alert_acks (tenant_id text not null, actor_id text not null, event_key text not null, at timestamptz not null, primary key (tenant_id, actor_id, event_key))`);
   await sql.query(`create table if not exists ${APP_SCHEMA}.settings (tenant_id text not null, project_id text not null, key text not null, value jsonb not null, updated_by text not null, updated_at timestamptz not null default now(), primary key (tenant_id, project_id, key))`);
+  // Research record standard: tool register, research runs and the write journal (append-only).
+  await migrateResearch(sql);
 }
 
 export async function compose(env: Env, options: { actions?: (runtime: Runtime) => Record<string, orchestrationModule.ActionDefinition>; migrate?: boolean; model?: ModelPort | null } = {}): Promise<Runtime> {
@@ -239,7 +242,8 @@ export async function compose(env: Env, options: { actions?: (runtime: Runtime) 
     async close() { await pool.end(); },
   };
   runtimeRef.current = runtime;
-  for (const [name, def] of Object.entries(options.actions?.(runtime) ?? {})) orchestration.registerAction(name, def);
+  // Every action execution is recorded as a research run (research record standard).
+  for (const [name, def] of Object.entries(options.actions?.(runtime) ?? {})) orchestration.registerAction(name, recordedAction(runtime, name, def));
   return runtime;
 }
 

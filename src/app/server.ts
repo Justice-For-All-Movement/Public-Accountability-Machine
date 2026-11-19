@@ -17,6 +17,7 @@ import { routeEventsOnce } from './router.ts';
 import { toEvidenceItems, toReleasePackage } from './adapters.ts';
 import type { RouterReport } from './router.ts';
 import { intakeLinks, syncIntakeOnce } from './intake.ts';
+import { gatewayCheck, researchRoutes } from './research.ts';
 import type { IntakeReport } from './intake.ts';
 
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.map': 'application/json' };
@@ -98,6 +99,8 @@ export function appRoutes(runtime: Runtime, state: AppState, extra: (runtime: Ru
       const pkg = { ref: body.package.ref, content: body.package.content as Json };
       return { package: toReleasePackage(pkg), items: toEvidenceItems(pkg) } as unknown as Json;
     } },
+    // Research record standard: tool register, research runs, the record of a project (src/app/research.ts).
+    ...researchRoutes(runtime),
     ...extra(runtime),
   ];
 }
@@ -189,7 +192,11 @@ export async function startServer(runtime: Runtime, options: StartOptions = {}):
       const handler = handlers.get(engineMatch[1] as string);
       if (handler === undefined) { res.writeHead(503, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify({ error: { code: 'unavailable', message: `The ${engineMatch[1]} engine is not running in this deployment` } })); return; }
       req.url = `${engineMatch[2]}${url.search}`;
-      handler(req, res); return;
+      // Research record standard: writes are journalled, and writes outside the application need an open research run.
+      void gatewayCheck(runtime, engineMatch[1] as string, req, res, engineMatch[2] as string)
+        .then((go) => { if (go) handler(req, res); })
+        .catch((error: unknown) => { onError(error, { requestId: 'gateway', method: req.method ?? '', path: url.pathname }); if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify({ error: { code: 'internal', message: 'The research record check failed; nothing was changed' } })); });
+      return;
     }
     if (url.pathname.startsWith('/api/app/')) { req.url = `${url.pathname.slice('/api/app'.length)}${url.search}`; app(req, res); return; }
     if (url.pathname === '/healthz') { req.url = '/healthz'; app(req, res); return; }

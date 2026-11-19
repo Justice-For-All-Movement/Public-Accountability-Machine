@@ -6,6 +6,15 @@ orchestration engine (E00) and the integrated application that coordinates fourt
 **Status: under active completion — not yet a finished product.** See [docs/CONTINUATION.md](docs/CONTINUATION.md) for exactly
 what works, what has been tested and what remains. Nothing here is deployed, and no live provider has been verified.
 
+## Research record standard
+
+PAM is a historical research platform as much as a tool for current accountability, and its findings must survive hostile
+dispute. Every person, script and AI agent using it follows the
+[research record standard](docs/RESEARCH_RECORD_STANDARD.md): every tool is registered by its exact source, every step is
+a recorded research run with its complete output, every write is journalled (scripts and agents cannot write outside a
+run), every decision is written into the project's research log with its reason, and none of it can be rewritten.
+`scripts/research-run.mjs` runs any script that way; the **Research record** screen shows it all.
+
 ## What exists today
 
 - `src/orchestration/` — E00: objectives, directives, workflow definitions, task graphs with dependencies, persistent agents

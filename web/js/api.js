@@ -1,6 +1,9 @@
 // Session and API access. The refresh token is kept in memory and in sessionStorage (never localStorage). Access tokens
 // are issued for exactly one purpose each, cached per purpose and re-issued once when an engine answers 401.
 const STORE = 'pam.session';
+// Marks requests as coming from the PAM application (research record standard: the application is the tool for these writes;
+// scripts and agents must instead name a research run). Every write is journalled either way.
+const CLIENT = { 'x-pam-client': 'pam-web' };
 const state = { refreshToken: null, tenantId: null, projectId: null, directory: null, tokens: new Map(), listeners: new Set() };
 
 export class ApiError extends Error {
@@ -134,7 +137,7 @@ export async function api(engine, path, options = {}) {
   const url = `/api/e/${engine}${path}${qs === '?' ? '' : qs}`;
   for (let attempt = 0; attempt < 2; attempt++) {
     const token = await tokenFor(purpose, attempt > 0);
-    const headers = { authorization: `Bearer ${token}`, ...(options.headers ?? {}) };
+    const headers = { authorization: `Bearer ${token}`, ...CLIENT, ...(options.headers ?? {}) };
     let body;
     if (options.body !== undefined) { headers['content-type'] = 'application/json'; body = JSON.stringify(options.body); }
     const res = await request(url, { method: options.method ?? (body === undefined ? 'GET' : 'POST'), headers, body });
@@ -149,7 +152,7 @@ export async function api(engine, path, options = {}) {
 }
 
 export async function appApi(path, options = {}) {
-  const headers = {};
+  const headers = { ...CLIENT };
   if (options.purpose) headers.authorization = `Bearer ${await tokenFor(options.purpose)}`;
   let body;
   if (options.body !== undefined) { headers['content-type'] = 'application/json'; body = JSON.stringify(options.body); }

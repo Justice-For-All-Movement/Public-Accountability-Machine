@@ -63,6 +63,18 @@ Purpose: an investigation in which many sources list the same people under diffe
   `--no-save` and driving the system Chrome (`/usr/bin/google-chrome`) through a preload script, because the Playwright CDN
   is blocked here.
 
+## Session 5 (2026-11-19): research record standard
+
+The owner made the research record standard binding for the platform (`docs/RESEARCH_RECORD_STANDARD.md`): PAM is a
+historical research platform whose record must survive hostile dispute. Implemented in `src/app/research.ts`:
+tool register (exact source in E05, SHA-256), research runs (purpose, tools, command, environment, build, UTC times,
+exit, outcome, output in E05, automatic entry in the project's research log — an E08 investigation opened on first use),
+the write journal (every authenticated gateway write, accepted or refused, with the engine's request id), gateway
+enforcement (`PAM_RESEARCH_RECORD=enforce` by default: a write from outside the web application needs an open run in
+`x-pam-run`, else 428; identity exempt), automatic runs for every orchestration action, append-only triggers, the
+Research record screen and `scripts/research-run.mjs`. Evidence: acceptance G; acceptance A–F and browser tests pass with
+it on. Local note: `engines/correspondence` needs `npm ci` in its checkout after a fresh clone (sanitize-html).
+
 ## Environment facts for the next session
 
 - Node 24 is not on PATH by default: `export PATH=/opt/node24/bin:$PATH` (install from nodejs.org if the container is new).
