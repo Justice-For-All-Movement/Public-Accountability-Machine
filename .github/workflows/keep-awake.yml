@@ -1,0 +1,23 @@
+# Keeps the hosted PAM service (Render free plan) from sleeping, so its worker keeps running between visits.
+# The free plan spins a service down after ~15 minutes without inbound requests; GitHub schedules may run a few
+# minutes late, so the interval is shorter than that. Read-only: it only requests the public health endpoint.
+name: Keep hosted PAM awake
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Health check (retries while the service wakes)
+        run: |
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS --max-time 60 https://pam-em80.onrender.com/healthz; then echo; exit 0; fi
+            sleep 20
+          done
+          echo "PAM did not answer its health check" >&2
+          exit 1
