@@ -41,3 +41,9 @@ export async function logStep(entry) {
   if (!LOG_ID) throw new Error('No research log investigation');
   return engine('investigation', 'POST', `/v1/investigations/${LOG_ID}/attempts`, entry);
 }
+
+/** Stores a file in evidence storage (E05) and returns its reference. */
+export async function storeEvidence(bytes, filename, mediaType, originLabel, idempotencyKey) {
+  const out = await engine('evidence', 'POST', '/v1/evidence/accept', { contentBase64: Buffer.from(bytes).toString('base64'), filename, mediaType, origin: { kind: 'upload', label: originLabel }, ...(idempotencyKey ? { idempotencyKey } : {}) });
+  return out.ref ?? out.versionRef ?? out.evidenceRef ?? (out.id ? `E05:evidence_version:${out.versionId ?? out.id}@${out.revision ?? 1}` : JSON.stringify(out));
+}

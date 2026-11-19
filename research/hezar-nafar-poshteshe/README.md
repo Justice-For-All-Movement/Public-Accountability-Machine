@@ -43,4 +43,14 @@ The scripts that produced each step, so a step can be re-run and checked. They c
 | `roster-dump.mjs`, `record-matches.mjs` | Map matches to record ids and record decisions with rationale |
 | `open-log.mjs`, `backfill-log.mjs` | Open the research log and the entries for the steps taken before the log existed |
 
-New steps add an entry to the research log as they run (`logStep` in `pam.mjs`).
+| `run.mjs` | **Recorder for every step from 2026-11-19 21:43 UTC on**: runs a script and stores a run record (script SHA-256, arguments, UTC start and end, exit status, full output) in evidence storage, with a research-log entry pointing to it |
+| `extract_runs.py`, `runs_md.py`, `store-history.mjs` | Rebuilt the history of commands run before the recorder existed (from the working session), stored it in PAM and wrote [RUNS.md](RUNS.md) |
+| `links.mjs`, `getfiles.mjs`, `step2-files.mjs`, `inspect_xls.py`, `probe.mjs`, `watch-run.mjs`, `check-*.mjs`, `step5-search.mjs`, `show-log.mjs`, `roster-count.mjs` | Smaller helpers: finding the official attachment links, fetching preserved files, inspecting the spreadsheet, probing the memorial site, watching capture runs, testing search sources, reading the log and roster |
+
+Also here:
+
+- [RUNS.md](RUNS.md): every command run for the research, in order, with UTC start and finish times and the exact command (including one-off analysis code typed inline, failed attempts and their fixes). Outputs, which contain names, are kept in PAM, not here.
+- [ENVIRONMENT.md](ENVIRONMENT.md): the PAM commit that was live for each step, engine versions, local tool versions and external services.
+
+The scripts are kept as they are now; a script edited between runs shows its earlier form in the command history in
+RUNS.md, and each run from 21:43 UTC on records the SHA-256 of the exact script that ran.
