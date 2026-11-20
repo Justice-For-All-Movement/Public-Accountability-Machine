@@ -131,6 +131,13 @@ export const SCREENS = {
     ['Failures and gaps', 'What could not be collected and why (blocked, not found, robots.txt). Gaps are findings too.'],
     ['Contact leads', 'Possible contacts noticed during collection, for a person to consider. Nobody is contacted automatically.'],
   ],
+  sealed: [
+    ['How sealing works', 'Material from people at risk is encrypted in your browser before it is sent. The server keeps only scrambled text, a code name, the channel, the date and a fingerprint. A copy of the server reveals neither what was said nor who said it.'],
+    ['Your sealing key', 'Your private key stays on this device; PAM holds only the public half. Keep the backup file and passphrase safe and separate: without them sealed material cannot be read if this device is lost.'],
+    ['Source code names', 'Each person is a code name (S-1, S-2…) with a channel and a risk level. Never record names, numbers, addresses or anything that identifies them here; keep identities on your own devices.'],
+    ['Add a sealed record', 'Paste a conversation or notes, or attach a file. It is encrypted here for every registered key, then stored as evidence. Facts drawn from it can cite it like any other evidence.'],
+    ['Sealed records', 'Every sealed record. "Decrypt here" opens one on this device only and checks its fingerprint, which proves it is the original as sealed.'],
+  ],
   'research-record': [
     ['Research record', 'Everything done to this project\'s research, kept so a later researcher, or anyone disputing the work, can see who did what, when, with which exact tool, why, and with what result. Nothing here can be changed or deleted.'],
     ['Research runs', 'One entry per execution of a script or agent: purpose, tools, command, times, result and the full output. Scripts and agents cannot change research outside a run.'],

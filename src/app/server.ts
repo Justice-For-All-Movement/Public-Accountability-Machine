@@ -18,6 +18,7 @@ import { toEvidenceItems, toReleasePackage } from './adapters.ts';
 import type { RouterReport } from './router.ts';
 import { intakeLinks, syncIntakeOnce } from './intake.ts';
 import { gatewayCheck, researchRoutes } from './research.ts';
+import { sealedRoutes } from './sealed.ts';
 import type { IntakeReport } from './intake.ts';
 
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.map': 'application/json' };
@@ -101,6 +102,8 @@ export function appRoutes(runtime: Runtime, state: AppState, extra: (runtime: Ru
     } },
     // Research record standard: tool register, research runs, the record of a project (src/app/research.ts).
     ...researchRoutes(runtime),
+    // Sealed records: encrypted in the browser; the server holds ciphertext, code names and commitments (src/app/sealed.ts).
+    ...sealedRoutes(runtime),
     ...extra(runtime),
   ];
 }
