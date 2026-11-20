@@ -13,11 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Health check (retries while the service wakes)
+      - name: Health checks (retries while each service wakes)
+        # Intake must stay awake too: it is also published as a Tor onion service, which is unreachable while asleep.
         run: |
-          for i in 1 2 3 4 5 6; do
-            if curl -fsS --max-time 60 https://pam-em80.onrender.com/healthz; then echo; exit 0; fi
-            sleep 20
+          ok=0
+          for url in https://pam-em80.onrender.com/healthz https://intake-pam.onrender.com/api/ready; do
+            for i in 1 2 3 4 5 6; do
+              if curl -fsS --max-time 60 -o /dev/null "$url"; then echo "awake: $url"; ok=$((ok+1)); break; fi
+              sleep 20
+            done
           done
-          echo "PAM did not answer its health check" >&2
-          exit 1
+          [ "$ok" -eq 2 ] || { echo "a service did not answer its health check" >&2; exit 1; }
