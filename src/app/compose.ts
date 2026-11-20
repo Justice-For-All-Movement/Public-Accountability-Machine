@@ -94,6 +94,9 @@ export async function migrateApp(sql: Sql): Promise<void> {
 export async function compose(env: Env, options: { actions?: (runtime: Runtime) => Record<string, orchestrationModule.ActionDefinition>; migrate?: boolean; model?: ModelPort | null } = {}): Promise<Runtime> {
   if (!env.DATABASE_URL) throw new DomainError('invalid_config', 'DATABASE_URL is required');
   const pool = new pg.Pool({ connectionString: env.DATABASE_URL, max: Number(env.DATABASE_POOL_MAX ?? 20) });
+  // The database (or its pooler) may close idle connections at any time; the pool replaces them. Without this handler an
+  // idle client's error is an unhandled 'error' event and ends the process.
+  pool.on('error', (error: Error) => { console.error(JSON.stringify({ level: 'warn', message: 'idle database connection closed', error: error.message })); });
   const sql = pgSql(pool);
   const enginesDir = resolve(env.PAM_ENGINES_DIR ?? './engines');
   const model = options.model === undefined ? modelFromEnv(env) : options.model;
