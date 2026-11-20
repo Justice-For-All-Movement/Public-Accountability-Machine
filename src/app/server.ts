@@ -106,8 +106,10 @@ export function appRoutes(runtime: Runtime, state: AppState, extra: (runtime: Ru
 }
 
 const inflight = new WeakMap<Runtime, Set<Promise<unknown>>>();
-/** Waits for task executions started by earlier worker passes (used on shutdown). */
-export async function drainWorker(runtime: Runtime): Promise<void> { await Promise.all([...(inflight.get(runtime) ?? [])]); }
+const engineInflight = new WeakMap<Runtime, Map<string, Promise<unknown>>>();
+const engineErrors = new WeakMap<Runtime, string>();
+/** Waits for task executions and engine job passes started by earlier worker passes (used on shutdown). */
+export async function drainWorker(runtime: Runtime): Promise<void> { await Promise.all([...(inflight.get(runtime) ?? []), ...(engineInflight.get(runtime)?.values() ?? [])]); }
 const lastHousekeeping = new WeakMap<Runtime, number>();
 /**
  * Periodic duties engines leave to their host (E13 licence expiry notices, E03 no-response outcomes). Runs at most once per
@@ -147,12 +149,21 @@ export async function workerPass(runtime: Runtime, state: AppState, worker: stri
     const pending = inflight.get(runtime) ?? new Set<Promise<unknown>>(); inflight.set(runtime, pending);
     const p: Promise<unknown> = runtime.orchestration.workOnce({ worker }).catch((error: unknown) => { state.lastWorkerError = error instanceof Error ? error.message : String(error); }).finally(() => pending.delete(p));
     pending.add(p);
-    for (const entry of runtime.engines.values()) if (entry.runJobs !== null) await entry.runJobs();
+    // Each engine's job runner runs independently of the others: a long job in one engine (a discovery collection run
+    // fetching hundreds of pages, say) must not hold up search, processing or agent work in the rest. At most one pass
+    // per engine is in flight; drainWorker waits for them on shutdown.
+    const engineRuns = engineInflight.get(runtime) ?? new Map<string, Promise<unknown>>(); engineInflight.set(runtime, engineRuns);
+    for (const entry of runtime.engines.values()) {
+      if (entry.runJobs === null || engineRuns.has(entry.short)) continue;
+      const job: Promise<unknown> = entry.runJobs().catch((error: unknown) => { engineErrors.set(runtime, `${entry.short}: ${error instanceof Error ? error.message : String(error)}`); }).finally(() => engineRuns.delete(entry.short));
+      engineRuns.set(entry.short, job);
+    }
     const intake = await syncIntakeOnce(runtime);
     state.lastIntake = intake;
     state.lastRouter = await routeEventsOnce(runtime);
     await housekeeping(runtime, state);
-    state.lastWorkerError = null;
+    // An engine job pass that failed since the last pass is reported now (it ran outside this pass).
+    state.lastWorkerError = engineErrors.get(runtime) ?? null; engineErrors.delete(runtime);
   } catch (error) { state.lastWorkerError = error instanceof Error ? error.message : String(error); }
   state.workerPasses++;
 }
