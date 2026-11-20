@@ -41,9 +41,9 @@ async function wrapKeyFor(bits, salt) {
 }
 
 /** Encrypts content ({ text, files?: [{ name, type, base64 }], … }) for the given recipients ([{ id, publicJwk }]). */
-export async function seal(content, recipients) {
+export async function seal(content, recipients, keepSalt = null) {
   if (!Array.isArray(recipients) || recipients.length === 0) throw new Error('No recipient keys: nobody could read this record');
-  const salt = rand(32);
+  const salt = keepSalt ?? rand(32);
   const body = enc.encode(canonical(content));
   const commitment = hex(await subtle.digest('SHA-256', new Uint8Array([...salt, ...body])));
   const plain = enc.encode(canonical({ v: 1, salt: b64(salt), content }));
@@ -74,7 +74,17 @@ export async function open(envelope, id, privateKey) {
   const aes = await subtle.importKey('raw', cek, 'AES-GCM', false, ['decrypt']);
   const inner = JSON.parse(dec.decode(await subtle.decrypt({ name: 'AES-GCM', iv: unb64(envelope.iv) }, aes, unb64(envelope.ciphertext))));
   const check = hex(await subtle.digest('SHA-256', new Uint8Array([...unb64(inner.salt), ...enc.encode(canonical(inner.content))])));
-  return { content: inner.content, commitmentVerified: check === envelope.commitment };
+  return { content: inner.content, commitmentVerified: check === envelope.commitment, salt: unb64(inner.salt) };
+}
+
+/** Re-seals a record for a new set of recipients (for example a researcher who joined later). The content and salt are
+ *  kept, so the commitment — the record's fingerprint — is unchanged and the record stays the same evidence. */
+export async function reseal(envelope, id, privateKey, recipients) {
+  const { content, commitmentVerified, salt } = await open(envelope, id, privateKey);
+  if (!commitmentVerified) throw new Error('The record does not match its fingerprint; it is not re-sealed');
+  const out = await seal(content, recipients, salt);
+  if (out.commitment !== envelope.commitment) throw new Error('Re-sealing changed the fingerprint');
+  return out;
 }
 
 /** Passphrase-protected backup of a private key (a file the person keeps). */

@@ -17,7 +17,7 @@ import { routeEventsOnce } from './router.ts';
 import { toEvidenceItems, toReleasePackage } from './adapters.ts';
 import type { RouterReport } from './router.ts';
 import { intakeLinks, syncIntakeOnce } from './intake.ts';
-import { gatewayCheck, researchRoutes } from './research.ts';
+import { closeInterruptedActionRuns, gatewayCheck, researchRoutes } from './research.ts';
 import { sealedRoutes } from './sealed.ts';
 import type { IntakeReport } from './intake.ts';
 
@@ -181,6 +181,9 @@ export type StartOptions = Readonly<{ port?: number; host?: string; webDir?: str
 
 export async function startServer(runtime: Runtime, options: StartOptions = {}): Promise<{ server: Server; url: string; state: AppState; stop(): Promise<void> }> {
   const state: AppState = { lastRouter: null, lastWorkerError: null, workerPasses: 0, startedAt: new Date().toISOString() };
+  // Research runs of actions that the previous process left open can never finish: close them as interrupted.
+  const closed = await closeInterruptedActionRuns(runtime, new Date(state.startedAt)).catch(() => 0);
+  if (closed > 0) console.log(JSON.stringify({ level: 'info', message: 'closed interrupted action runs', count: closed }));
   const onError = (error: unknown, info: { requestId: string; method: string; path: string }): void => { console.error(JSON.stringify({ level: 'error', requestId: info.requestId, method: info.method, path: info.path, error: error instanceof Error ? error.message : String(error) })); };
   const handlers = new Map<string, (req: IncomingMessage, res: ServerResponse) => void>();
   for (const entry of runtime.engines.values()) if (entry.engine !== null) handlers.set(entry.short, createHttpHandler({ name: entry.short, version: entry.engine.manifest.version, routes: entry.routes, verify: runtime.verify, health: () => (entry.engine as NonNullable<typeof entry.engine>).health(), onError }));

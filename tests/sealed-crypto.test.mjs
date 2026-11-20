@@ -1,7 +1,7 @@
 // Sealed records: encryption round trip, recipients, commitment, tampering, key backup.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateKeyPair, importPrivate, seal, open, backup, restore, keyId } from '../web/js/sealed-crypto.js';
+import { generateKeyPair, importPrivate, seal, open, backup, restore, keyId, reseal } from '../web/js/sealed-crypto.js';
 
 test('a sealed record opens only with a recipient key, and its commitment proves the original', async () => {
   const a = await generateKeyPair(), b = await generateKeyPair(), outsider = await generateKeyPair();
@@ -35,4 +35,14 @@ test('a key backup restores only with its passphrase', { timeout: 60_000 }, asyn
   assert.equal(r.id, k.id);
   const env = await seal({ text: 'x' }, [{ id: k.id, publicJwk: k.publicJwk }]);
   assert.equal((await open(env, r.id, await importPrivate(r.privateJwk))).content.text, 'x');
+});
+
+test('re-sealing for a new researcher keeps the fingerprint and lets the new key read the record', async () => {
+  const a = await generateKeyPair(), late = await generateKeyPair();
+  const env = await seal({ text: 'notes' }, [{ id: a.id, publicJwk: a.publicJwk }]);
+  await assert.rejects(open(env, late.id, await importPrivate(late.privateJwk)), /not sealed for your key/);
+  const env2 = await reseal(env, a.id, await importPrivate(a.privateJwk), [{ id: a.id, publicJwk: a.publicJwk }, { id: late.id, publicJwk: late.publicJwk }]);
+  assert.equal(env2.commitment, env.commitment);
+  const out = await open(env2, late.id, await importPrivate(late.privateJwk));
+  assert.equal(out.content.text, 'notes'); assert.equal(out.commitmentVerified, true);
 });

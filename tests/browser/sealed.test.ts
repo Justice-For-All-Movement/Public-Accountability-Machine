@@ -23,12 +23,12 @@ test('sealed sources: the server never sees the plaintext; the device decrypts a
     await page.getByLabel(/^Channel/).selectOption('signal');
     await page.getByLabel(/^Risk to this person/).selectOption('severe');
     await page.getByRole('button', { name: 'Create code name' }).click();
-    await page.getByText('Created S-1.').waitFor();
+    await page.locator('table th, table td').filter({ hasText: /^S-1$/ }).first().waitFor();
     await page.goto(`${app.url}/sealed`); await settled(page);
     await page.getByLabel(/^Kind/).selectOption('conversation');
     await page.getByLabel(/^Text \(paste/).fill(SECRET);
     await page.getByRole('button', { name: 'Encrypt here and upload' }).click();
-    await page.getByText(/Sealed and uploaded as E05:/).waitFor({ timeout: 30_000 });
+    await page.locator('.pam-form-status', { hasText: /Sealed and uploaded as E05:/ }).waitFor({ timeout: 30_000 });
 
     // The server: no plaintext anywhere in the stored evidence or the record index.
     const rows = await app.stack.runtime.sql.query<{ evidence_ref: string; source_code: string }>('select evidence_ref, source_code from pam_app.sealed_records');

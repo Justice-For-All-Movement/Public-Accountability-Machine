@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { REQUIRED, skipReason, withStack } from './harness.ts';
 import { startServer } from '../../src/app/server.ts';
+import { closeInterruptedActionRuns } from '../../src/app/research.ts';
 
 const skip = skipReason(REQUIRED);
 
@@ -82,6 +83,14 @@ test('G: research record — tools, runs, journal, enforcement and append-only s
       const detail = await call(`/api/app/v1/research/runs/${run.json.id}`);
       assert.equal(detail.json.writes.length, 2); // the accepted write and the refused late write
       assert.deepEqual(detail.json.writes.map((w: { status: number }) => w.status).sort(), [201, 409]);
+
+      // 7b. A PAM action's run left open by a stopped process is closed as interrupted at the next start; people's runs are not touched.
+      await stack.runtime.sql.query(`insert into pam_app.research_runs (id, tenant_id, project_id, purpose, tools, command, actor_id, actor_kind, build, started_at) values ('run_orphan', $1, $2, 'agent.x', $3, 'task t', 'svc', 'service', 'b', now() - interval '1 hour')`, [org.tenantId, org.projectId, [tool.json.sha256]]);
+      const open = await call('/api/app/v1/research/runs', { body: { purpose: 'still running', tools: [tool.json.sha256], command: 'python3 scraper.py' } });
+      assert.equal(await closeInterruptedActionRuns(stack.runtime, new Date()), 1);
+      const orphan = (await stack.runtime.sql.query<{ outcome: string; finished_at: Date | null }>(`select outcome, finished_at from pam_app.research_runs where id='run_orphan'`))[0]!;
+      assert.equal(orphan.outcome, 'failed'); assert.ok(orphan.finished_at);
+      assert.equal((await stack.runtime.sql.query<{ finished_at: Date | null }>(`select finished_at from pam_app.research_runs where id=$1`, [open.json.id]))[0]!.finished_at, null);
 
       // 8. Append-only in the database itself.
       await assert.rejects(stack.runtime.sql.query(`update pam_app.research_journal set status=200`), /append-only/);

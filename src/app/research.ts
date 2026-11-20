@@ -185,6 +185,17 @@ export async function finishRun(runtime: Runtime, ctx: ServiceContext, id: strin
   return runView({ ...run, finished_at: finishedAt, exit_code: input.exitCode, outcome, summary: input.summary, output_ref: outputRef, log_attempt_id: attemptId, log_error: logError });
 }
 
+/**
+ * Closes runs of PAM's own actions that the previous process left open: an action that was executing when the process
+ * stopped can never finish its run (the orchestrator retries the task, which records a new run). People's runs are left
+ * for their owners to close. Uses the one change the append-only trigger allows: finishing an open run.
+ */
+export async function closeInterruptedActionRuns(runtime: Runtime, before: Date): Promise<number> {
+  const rows = await runtime.sql.query(`update ${S}.research_runs set finished_at=now(), exit_code=1, outcome='failed', summary='Interrupted: the PAM process stopped (restart or deploy) while this action was running; the orchestrator retries the task as a new run.', log_error='interrupted before a log entry could be written'
+    where finished_at is null and actor_kind <> 'human' and started_at < $1 returning id`, [before.toISOString()]);
+  return rows.length;
+}
+
 // ───────────── gateway: enforcement and journal ─────────────
 /**
  * Called by the gateway before an engine handles a request. Returns false when it has answered the request itself

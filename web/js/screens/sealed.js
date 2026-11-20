@@ -23,6 +23,7 @@ export async function render(el, ctx) {
   const srcR = region('Source code names', 2);
   const addR = region('Add a sealed record', 2);
   const listR = region('Sealed records', 2);
+  intro.body.append(h('p', {}, 'For the safest reading, use the ', h('a', { href: 'https://github.com/Justice-For-All-Movement/Public-Accountability-Machine/blob/main/tools/sealed-reader.html', rel: 'noreferrer', text: 'offline sealed reader' }), ': save it once, check its fingerprint against docs/SEALED_SOURCES.md, and open downloaded sealed files with it on your own device, without any page from this server.'));
   el.append(intro.el, keyR.el, srcR.el, addR.el, listR.el);
 
   const reloadKey = section(keyR.body, async () => ({ mine: await deviceKey(projectKey), keys: (await appApi('/v1/sealed/keys', { purpose: p })).keys }), ({ mine, keys }, body) => {
@@ -83,11 +84,29 @@ export async function render(el, ctx) {
       } }));
   });
 
-  const reloadList = section(listR.body, () => appApi('/v1/sealed/records', { purpose: p }), (out, body) => {
+  const reloadList = section(listR.body, async () => ({ ...(await appApi('/v1/sealed/records', { purpose: p })), keys: (await appApi('/v1/sealed/keys', { purpose: p })).keys }), (out, body) => {
+    const active = out.keys.map((k) => k.keyId);
     const viewer = h('div', { class: 'pam-sealed-viewer' });
     listOrEmpty(body, out.records, 'No sealed records yet', 'Sealed records appear here; only holders of a listed key can open them.', { caption: 'Sealed records, newest first', columns: [
       { key: 'sourceCode', label: 'Source' }, { key: 'kind', label: 'Kind' }, { key: 'occurredOn', label: 'Date' }, { key: 'channel', label: 'Channel' },
       { key: 'evidenceRef', label: 'Evidence', sortable: false, render: (r) => ref(r.evidenceRef, 'evidence') },
+      { key: 'recipients', label: 'Readable by', sortable: false, render: (r) => {
+        const missing = active.filter((k) => !r.recipients.includes(k));
+        const span = h('span', { text: `${r.recipients.filter((k) => active.includes(k)).length} of ${active.length} current keys` });
+        if (missing.length === 0) return span;
+        return h('span', {}, span, ' ', action('Re-seal for current keys', async () => {
+          const mine = await deviceKey(projectKey); if (!mine || !r.recipients.includes(mine.id)) throw new Error('Only someone who can open this record can re-seal it');
+          const env = await appApi(`/v1/sealed/records/${encodeURIComponent(r.id)}/envelope`, { purpose: p });
+          const next = await sc.reseal(env, mine.id, mine.privateKey, out.keys.map((k) => ({ id: k.keyId, publicJwk: k.publicJwk })));
+          await appApi(`/v1/sealed/records/${encodeURIComponent(r.id)}/reseal`, { purpose: p, body: { envelope: next } });
+          queueMicrotask(reloadList); return 'Re-sealed; the fingerprint is unchanged.';
+        }));
+      } },
+      { key: 'commitment', label: 'Offline copy', sortable: false, render: (r) => action('Download sealed file', async () => {
+        const env = await appApi(`/v1/sealed/records/${encodeURIComponent(r.id)}/envelope`, { purpose: p });
+        download(`${r.id}.sealed.json`, { ...env, label: `${r.sourceCode} · ${r.kind}${r.occurredOn ? ` · ${r.occurredOn}` : ''}` });
+        return 'Downloaded (still encrypted). Open it with the offline sealed reader.';
+      }) },
       { key: 'id', label: 'Open', sortable: false, render: (r) => action('Decrypt here', async () => {
         const mine = await deviceKey(projectKey); if (!mine) throw new Error('No sealing key on this device');
         const env = await appApi(`/v1/sealed/records/${encodeURIComponent(r.id)}/envelope`, { purpose: p });

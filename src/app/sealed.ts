@@ -25,6 +25,8 @@ export async function migrateSealed(sql: Sql): Promise<void> {
     note text, created_by text not null, created_at timestamptz not null default now(), primary key (tenant_id, project_id, code))`);
   await sql.query(`create table if not exists ${S}.sealed_records (id text primary key, tenant_id text not null, project_id text not null, source_code text not null, channel text not null,
     occurred_on date, kind text not null, evidence_ref text not null, commitment text not null, recipients text[] not null, created_by text not null, created_at timestamptz not null default now())`);
+  // Earlier envelopes of a record (re-sealed for new keys); each stays in evidence storage.
+  await sql.query(`create table if not exists ${S}.sealed_record_versions (record_id text not null, evidence_ref text not null, recipients text[] not null, replaced_by text not null, replaced_at timestamptz not null default now())`);
   await sql.query(`create index if not exists sealed_records_scope on ${S}.sealed_records (tenant_id, project_id, created_at desc)`);
 }
 
@@ -131,6 +133,23 @@ export function sealedRoutes(runtime: Runtime): Route[] {
       await sql.query(`insert into ${S}.sealed_records (id, tenant_id, project_id, source_code, channel, occurred_on, kind, evidence_ref, commitment, recipients, created_by) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) on conflict (id) do nothing`,
         [id, r.ctx.tenantId, r.ctx.projectId, code, src.channel, occurredOn, kind, stored.ref, env.commitment, env.recipients, r.ctx.actor.id]);
       return { status: 201, json: { id, evidenceRef: stored.ref, commitment: env.commitment } };
+    } },
+    // Re-seal for the project's current keys. The commitment must be unchanged (same content, same salt), so the record
+    // stays the same evidence; the earlier envelope is kept.
+    { method: 'POST', path: '/v1/sealed/records/:id/reseal', handler: async (r) => {
+      requireCapability(r.ctx, 'evidence:write');
+      const row = (await sql.query<{ evidence_ref: string; commitment: string; recipients: string[]; source_code: string; kind: string }>(`select evidence_ref, commitment, recipients, source_code, kind from ${S}.sealed_records where tenant_id=$1 and project_id=$2 and id=$3`, [r.ctx.tenantId, r.ctx.projectId, r.params.id]))[0] ?? (() => { throw new DomainError('not_found', 'No such sealed record'); })();
+      const b = body(r); const env = checkEnvelope(b.envelope);
+      if (env.commitment !== row.commitment) throw new DomainError('invalid_input', 'The re-sealed envelope has a different fingerprint: it is not the same record');
+      const active = new Set((await sql.query<{ key_id: string }>(`select key_id from ${S}.sealing_keys where tenant_id=$1 and project_id=$2 and revoked_at is null`, [r.ctx.tenantId, r.ctx.projectId])).map((x) => x.key_id));
+      const unknown = env.recipients.filter((k) => !active.has(k)); if (unknown.length) fail('envelope is sealed for keys that are not registered in this project');
+      const stored = await runtime.get('evidence').accept(r.ctx, { bytes: new TextEncoder().encode(JSON.stringify(b.envelope)), mediaType: SEALED_MEDIA_TYPE, filename: `${r.params.id}.sealed.json`,
+        origin: { kind: 'sealed_record_reseal', label: `Sealed record ${r.params.id} (source ${row.source_code}) re-sealed for ${env.recipients.length} keys; same fingerprint ${row.commitment.slice(0, 16)}…; previous envelope ${row.evidence_ref}` } as Json, idempotencyKey: `reseal-${r.params.id}-${[...env.recipients].sort().join('').slice(0, 64)}` }) as { ref: string };
+      await sql.tx(async (tx) => {
+        await tx.query(`insert into ${S}.sealed_record_versions (record_id, evidence_ref, recipients, replaced_by) values ($1,$2,$3,$4)`, [r.params.id, row.evidence_ref, row.recipients, r.ctx.actor.id]);
+        await tx.query(`update ${S}.sealed_records set evidence_ref=$2, recipients=$3 where id=$1`, [r.params.id, stored.ref, env.recipients]);
+      });
+      return { id: r.params.id, evidenceRef: stored.ref, previous: row.evidence_ref, recipients: env.recipients.length } as unknown as Json;
     } },
     // The envelope itself, for decryption in the browser.
     { method: 'GET', path: '/v1/sealed/records/:id/envelope', handler: async (r) => {

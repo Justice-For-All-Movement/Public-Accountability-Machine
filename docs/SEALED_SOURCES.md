@@ -45,10 +45,23 @@ conversation on a date — not what was said, and not who S-17 is.
 
 - **A compromised server serving altered pages.** Someone in control of the server could change the web page to capture a
   key when it is next used. Signs: unexpected requests to register keys, fingerprints you do not recognise. Planned: a
-  small separate desktop reader for sealed records, so decryption does not depend on pages served by the server.
+  the offline reader below for reading; key creation and sealing still use pages served by the server.
 - **Compromised devices.** A researcher's unlocked device, or a source's phone, reveals what is on it. Use disappearing
   messages on Signal and full-disk encryption.
 - **Metadata outside PAM.** Signal, email and phone networks see who contacted whom. Prefer Signal usernames and the intake
   onion address for people connected to Iran or other repressive states.
 - **Not yet sealed:** the intake application's own submissions and the correspondence engine's email (planned next:
   encrypt intake submissions in the participant's browser to the project keys, and seal inbound email on arrival).
+
+## Offline reader and re-sealing
+
+- **Offline reader** — `tools/sealed-reader.html` is one self-contained file that opens sealed records with your key
+  backup, entirely on your device. It loads nothing and its content-security policy forbids every network connection, so
+  it does not depend on pages served by a PAM server (which closes the "altered page" risk above for reading). Save it
+  once from the repository and check its SHA-256 with `shasum -a 256 sealed-reader.html`. Current fingerprint:
+  `460c46e3b248367da74b140672e98dd972b1f03e7e2c4c57bfb4ad309d9548b4`. Download sealed files from the Sealed sources page ("Download sealed file").
+- **Re-sealing** — a record is readable by the keys registered when it was sealed. When a researcher joins, anyone who can
+  open a record uses "Re-seal for current keys": the record is decrypted and encrypted again on their device for every
+  current key, with the same salt, so its fingerprint does not change and the server checks that. The earlier envelope
+  stays in evidence storage.
+- **Agents' research runs** left open by a restart are closed as interrupted when PAM starts.
