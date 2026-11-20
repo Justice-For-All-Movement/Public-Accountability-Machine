@@ -120,3 +120,14 @@ input, select, textarea, button { font: inherit; }
 /* Two-factor setup: the QR code always sits on white with a quiet zone so phone cameras read it in dark mode too. */
 .pam-qr-box { display: inline-block; padding: 8px; background: #ffffff; border-radius: 8px; margin: 8px 0; }
 .pam-qr { display: block; max-width: 100%; height: auto; shape-rendering: crispEdges; }
+
+/* In-app help: help bubbles and the guided tour (web/js/guide.js). */
+.pam-help-tools { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.pam-help-tools .ws-button[aria-pressed="true"] { background: var(--ws-accent); color: var(--ws-accent-text); }
+.pam-help-on .pam-region > h2, .pam-help-on .pam-region > h3 { text-decoration: underline dotted; text-underline-offset: 0.25em; cursor: help; }
+.pam-help-bubble { position: absolute; z-index: 200; background: var(--ws-surface); color: var(--ws-text); border: 2px solid var(--pam-brand); border-radius: 0.5rem; padding: 0.5rem 0.75rem; box-shadow: 0 4px 16px rgb(0 0 0 / 0.25); font-size: 0.9rem; line-height: 1.4; }
+.pam-help-bubble p { margin: 0.25rem 0; }
+.pam-help-bubble__title { font-weight: 700; }
+.pam-help-bubble__count { font-size: 0.8rem; color: var(--ws-muted, inherit); }
+.pam-help-tour__bar { display: flex; gap: 0.25rem; flex-wrap: wrap; margin-top: 0.5rem; }
+.pam-help-target { outline: 3px solid var(--pam-brand); outline-offset: 4px; border-radius: 0.25rem; }

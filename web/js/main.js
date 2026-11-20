@@ -3,6 +3,7 @@ import * as session from './api.js';
 import { h, clear, form, announce, setInspectorOpener, renderError } from './ui.js';
 import { createInspector } from './inspector.js';
 import { SCREENS } from './screens/index.js';
+import { installHelp, onRoute } from './guide.js';
 
 const $ = (id) => document.getElementById(id);
 const main = $('main');
@@ -11,6 +12,7 @@ export function currentPurpose() { return app.purpose; }
 
 const inspector = createInspector({ drawer: $('pam-inspector'), body: $('pam-inspector-body'), title: $('pam-inspector-title'), close: $('pam-inspector-close'), purpose: () => app.purpose });
 setInspectorOpener((ref) => inspector.open(ref));
+installHelp($('pam-tools'));
 
 function applyBranding() {
   const org = session.currentOrganization();
@@ -76,6 +78,7 @@ function signInView() {
 }
 
 export async function route() {
+  onRoute();
   const s = session.session();
   if (!s.signedIn) { signInView(); return; }
   shell(true);
