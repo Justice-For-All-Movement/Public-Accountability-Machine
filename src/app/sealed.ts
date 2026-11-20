@@ -65,6 +65,47 @@ export function checkEnvelope(v: unknown): { commitment: string; recipients: str
 const read = (ctx: ServiceContext): void => { if (!['evidence:read', 'investigation:read', 'knowledge:read'].some((c) => ctx.capabilities.includes(c))) requireCapability(ctx, 'evidence:read'); };
 const body = (r: { body: unknown }): Record<string, unknown> => (r.body && typeof r.body === 'object' && !Array.isArray(r.body) ? r.body as Record<string, unknown> : fail('A JSON object body is required'));
 
+/** Creates the next source code name (S-n) in the caller's project. */
+export async function createSourceCode(runtime: Runtime, ctx: ServiceContext, input: { channel: string; risk: string; note?: string | null }): Promise<string> {
+  if (!CHANNELS.includes(input.channel)) fail(`channel must be one of ${CHANNELS.join(', ')}`);
+  if (!RISK.includes(input.risk)) fail(`risk must be one of ${RISK.join(', ')}`);
+  return runtime.sql.tx(async (tx) => {
+    await tx.query(`select pg_advisory_xact_lock(hashtext($1))`, [`sealed-sources:${ctx.tenantId}:${ctx.projectId}`]);
+    const seq = Number((await tx.query<{ n: string }>(`select coalesce(max(seq), 0) + 1 as n from ${S}.sealed_sources where tenant_id=$1 and project_id=$2`, [ctx.tenantId, ctx.projectId]))[0]?.n ?? 1);
+    await tx.query(`insert into ${S}.sealed_sources (tenant_id, project_id, code, seq, channel, risk, note, created_by) values ($1,$2,$3,$4,$5,$6,$7,$8)`, [ctx.tenantId, ctx.projectId, `S-${seq}`, seq, input.channel, input.risk, input.note ?? null, ctx.actor.id]);
+    return `S-${seq}`;
+  });
+}
+
+/** The project's active public sealing keys, as recipients for seal(). */
+export async function activeRecipients(runtime: Runtime, ctx: { tenantId: string; projectId: string }): Promise<{ id: string; publicJwk: Json }[]> {
+  return (await runtime.sql.query<{ key_id: string; public_jwk: Json }>(`select key_id, public_jwk from ${S}.sealing_keys where tenant_id=$1 and project_id=$2 and revoked_at is null`, [ctx.tenantId, ctx.projectId])).map((k) => ({ id: k.key_id, publicJwk: k.public_jwk }));
+}
+
+/**
+ * Seals content on the server for the project's current public keys (no private key is involved, so the server can
+ * seal but never open). Used where content necessarily passes through the server first (inbound email, intake
+ * submissions arriving unsealed): it should then be erased from where it arrived. Throws if the project has no keys.
+ */
+export async function sealOnServer(runtime: Runtime, ctx: { tenantId: string; projectId: string }, content: Json): Promise<Json> {
+  const recipients = await activeRecipients(runtime, ctx);
+  if (recipients.length === 0) throw new DomainError('invalid_state', 'No sealing keys are registered in this project; nothing can be sealed');
+  const { seal } = await import('../../web/js/sealed-crypto.js' as string) as { seal(c: Json, r: unknown[]): Promise<Json> };
+  return seal(content, recipients);
+}
+
+/** Stores a sealed record (an envelope already produced by seal()) for an existing source code. */
+export async function storeSealedRecord(runtime: Runtime, ctx: ServiceContext, input: { sourceCode: string; kind: 'conversation' | 'interview_notes' | 'document' | 'other'; occurredOn?: string | null; envelope: Json; originLabel?: string }): Promise<{ id: string; evidenceRef: string; commitment: string }> {
+  const src = (await runtime.sql.query<{ channel: string }>(`select channel from ${S}.sealed_sources where tenant_id=$1 and project_id=$2 and code=$3`, [ctx.tenantId, ctx.projectId, input.sourceCode]))[0] ?? fail('Unknown source code');
+  const env = checkEnvelope(input.envelope);
+  const id = `sealed_${createHash('sha256').update(env.commitment).digest('hex').slice(0, 24)}`;
+  const stored = await runtime.get('evidence').accept(ctx, { bytes: new TextEncoder().encode(JSON.stringify(input.envelope)), mediaType: SEALED_MEDIA_TYPE, filename: `${id}.sealed.json`,
+    origin: { kind: 'sealed_record', label: input.originLabel ?? `Sealed ${input.kind} from source ${input.sourceCode} (${src.channel})` } as Json, idempotencyKey: `sealed-${env.commitment}` }) as { ref: string };
+  await runtime.sql.query(`insert into ${S}.sealed_records (id, tenant_id, project_id, source_code, channel, occurred_on, kind, evidence_ref, commitment, recipients, created_by) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) on conflict (id) do nothing`,
+    [id, ctx.tenantId, ctx.projectId, input.sourceCode, src.channel, input.occurredOn ?? null, input.kind, stored.ref, env.commitment, env.recipients, ctx.actor.id]);
+  return { id, evidenceRef: stored.ref, commitment: env.commitment };
+}
+
 export function sealedRoutes(runtime: Runtime): Route[] {
   const sql = runtime.sql;
   return [
