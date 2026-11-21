@@ -50,8 +50,49 @@ conversation on a date — not what was said, and not who S-17 is.
   messages on Signal and full-disk encryption.
 - **Metadata outside PAM.** Signal, email and phone networks see who contacted whom. Prefer Signal usernames and the intake
   onion address for people connected to Iran or other repressive states.
-- **Not yet sealed:** the intake application's own submissions and the correspondence engine's email (planned next:
-  encrypt intake submissions in the participant's browser to the project keys, and seal inbound email on arrival).
+- **Not yet sealed:** the intake application's own submissions (planned next: encrypt intake submissions in the
+  participant's browser to the project keys), and email to mailboxes that are not marked sealed (see below).
+
+## Sealed mailboxes (seal on arrival)
+
+An administrator marks mailboxes as sealed (Correspondence page, "Sealed mailboxes"; project setting
+`correspondence.sealedMailboxes`; `PUT /api/app/v1/correspondence/sealed-mailboxes { mailboxIds }`, `correspondence:admin`,
+people only). For every message the correspondence engine (E03) receives in a sealed mailbox, PAM's worker
+(`src/app/sealed-mail.ts`, reacting to E03 `message.received`):
+
+1. reads the message once with PAM's service identity: text, HTML, attachments, and the headers (from, to, cc, subject,
+   date, Message-ID), all of which go **inside** the ciphertext;
+2. seals it on the server for every registered public sealing key (the server can seal, never open);
+3. stores it as a sealed record (kind `conversation`, channel `email`, date of arrival) under a code name for the sender.
+   One code per sender address: PAM recognises a returning sender only through
+   `HMAC-SHA-256(SEALED_MAIL_HMAC_KEY, organization, project, address)` in `pam_app.sealed_mail_senders`; the address
+   itself is not stored, and without the key the table reveals nothing. New codes are created with risk `high`;
+4. asks E03 to erase the message (`eraseMessageContent`, `preservedAs` = the sealed record's evidence reference). E03
+   removes the subject, text, HTML, addresses and names, the original and attachment bytes and everything derived from
+   them, and shows "Content sealed and erased; preserved as E05:…" instead. E03 itself confirms with the evidence engine
+   that the reference exists before erasing anything.
+
+Safety rules: nothing is erased unless the sealed record is stored (each step is recorded in `pam_app.sealed_mail` before
+the next one; a crash resumes at the step it reached). With **no sealing key registered**, nothing is sealed or erased:
+the message stays readable in the mailbox and appears under "Needs attention" (`sealed mail waiting for keys`); it is
+sealed and erased automatically once a researcher creates a key. Failures are retried with backoff and listed as
+`sealed mail failed`. Replies in sealed mailboxes are never forwarded to the knowledge engine as proposals. PAM's service
+identity needs the exact capability `correspondence:erase`, added to the `service_orchestrator` role by provisioning
+(Administration → Run provisioning, or `npm run bootstrap-admin`).
+
+Configuration: `SEALED_MAIL_HMAC_KEY` (at least 32 characters, random, kept secret, never changed — a new key means
+returning senders get new code names). Without it mail is still sealed and erased, but each message gets a new code name
+and an alert says so. `PAM_SEALED_MAIL_RETRY_MS` (default 30000) is the retry interval.
+
+What sealing on arrival does **not** hide: that a message arrived, when, in which mailbox, and its Message-ID,
+In-Reply-To and References headers (kept by E03 for threading; a Message-ID often names the sender's mail domain); the
+mail provider's own copy (E03 reads mailboxes, it does not delete from them: configure the provider to delete or not keep
+mail); that a recorded contact replied to a conversation PAM started (the outbound message and its recipient are not
+sealed); an address that asked not to be contacted (kept as a suppression). Database row versions remain until
+PostgreSQL vacuums them and stay in WAL, backups and point-in-time-restore history for their retention period; a
+filesystem object store unlinks files without overwriting them, and a versioned S3 bucket keeps old versions. Mail that
+arrived before a mailbox was marked sealed is not changed. Sealing happens on the server, so the server sees each message
+briefly in clear while sealing it.
 
 ## Offline reader and re-sealing
 

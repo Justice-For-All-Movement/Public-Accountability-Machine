@@ -4,6 +4,7 @@
 import type { EngineEvent, ServiceContext, UpstreamChange } from '../service-kit.ts';
 import { parseUref } from '../service-kit.ts';
 import type { Runtime } from './compose.ts';
+import { isSealedMessage, onMessageReceived } from './sealed-mail.ts';
 
 type Rule = Readonly<{ match: RegExp; kind: UpstreamChange['kind']; to: readonly string[]; refs?: (e: EngineEvent) => string[] }>;
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : typeof v === 'string' ? [v] : []);
@@ -38,8 +39,12 @@ export const RULES: readonly Rule[] = [
  */
 type Reaction = Readonly<{ match: RegExp; run: (runtime: Runtime, ctx: ServiceContext, e: EngineEvent, eventKey: string) => Promise<void> }>;
 export const REACTIONS: readonly Reaction[] = [
+  // Seal on arrival (src/app/sealed-mail.ts): mail to a sealed mailbox is sealed for the project keys and erased from E03.
+  // Runs before the reply reaction below, which skips sealed messages so their text is never copied into proposals.
+  { match: /^message\.received$/, run: async (runtime, ctx, e, eventKey) => { if (eventKey.startsWith('E03:')) await onMessageReceived(runtime, ctx, e); } },
   { match: /^correspondence\.reply_received$/, run: async (runtime, ctx, e, eventKey) => {
     const knowledge = runtime.maybe('knowledge'); if (knowledge === null) return;
+    if (await isSealedMessage(runtime, ctx, e)) return;
     const p = payload(e); const candidates = (Array.isArray(p.candidates) ? p.candidates : []) as { text?: unknown }[];
     const items = candidates.filter((c) => typeof c.text === 'string' && c.text.trim().length >= 12).slice(0, 20).map((c) => ({ text: (c.text as string).trim().slice(0, 2000), claimType: 'allegation', ...(typeof p.questionRef === 'string' ? { question: p.questionRef } : {}) }));
     if (items.length === 0) return;

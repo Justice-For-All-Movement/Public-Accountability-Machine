@@ -89,6 +89,7 @@ export const SCREENS = {
     ['Sending grants', 'Who may send from which mailbox, to whom, and until when.'],
     ['Contacts', 'People and organizations you correspond with, with their consent and contact restrictions.'],
     ['Mailboxes', 'The email accounts PAM sends and receives through.'],
+    ['Sealed mailboxes', 'Mailboxes whose incoming mail is sealed on arrival: encrypted for the researchers’ sealing keys, kept as a sealed record under a code name for the sender, then erased here, so a break-in finds only a tombstone. Without a registered sealing key nothing is erased and each message is listed under Needs attention. Only an administrator can change the list.'],
   ],
   editorial: [
     ['Editorial projects', 'Stories, reports and scripts being written from investigation findings.'],

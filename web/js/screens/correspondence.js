@@ -1,6 +1,6 @@
 // Correspondence (E03): a mail workspace. Inbound content is untrusted: plain text is shown as text and HTML only in a
 // sandboxed iframe without scripts. Sending states are shown in words, never as progress.
-import { api } from '../api.js';
+import { api, appApi } from '../api.js';
 import { h, clear, region, section, table, renderEmpty, form, action, dl, ref, badge, download, sandboxedHtml, announce } from '../ui.js';
 
 const FOLDERS = ['inbox', 'starred', 'sent', 'drafts', 'outbox', 'archive', 'spam', 'trash', 'all'];
@@ -16,7 +16,8 @@ export async function render(el, ctx) {
   el.append(layout);
   const listR = region('Conversations'); const threadR = region('Conversation'); const composeR = region('Compose');
   const queueR = region('Dispatch queue'); const grantsR = region('Sending grants'); const contactsR = region('Contacts'); const mailboxesR = region('Mailboxes');
-  mainCol.append(listR.el, threadR.el, composeR.el, queueR.el, grantsR.el, contactsR.el, mailboxesR.el);
+  const sealedR = region('Sealed mailboxes');
+  mainCol.append(listR.el, threadR.el, composeR.el, queueR.el, grantsR.el, contactsR.el, mailboxesR.el, sealedR.el);
   threadR.body.append(h('p', { class: 'ws-muted', text: 'Select a conversation to read it.' }));
 
   const loadFolders = () => section(side, () => api('correspondence', '/v1/counts', { purpose: ctx.purpose }), (c, body) => {
@@ -95,12 +96,28 @@ export async function render(el, ctx) {
     body.append(form({ legend: 'Add a mailbox (administration purpose)', submit: 'Add mailbox', fields: [{ name: 'address', label: 'Address', type: 'email', required: true }, { name: 'displayName', label: 'Display name' }, { name: 'provider', label: 'Provider', type: 'select', options: ['ingest_only', 'smtp_imap', 'gmail', 'graph'], help: 'Provider settings and credentials are completed by an operator; ingest_only needs none.' }],
       onSubmit: async (v) => { await api('correspondence', '/v1/mailboxes', { purpose: 'administration', body: { address: v.address, provider: v.provider, ...(v.displayName ? { displayName: v.displayName } : {}) } }); setTimeout(() => ctx.navigate('/correspondence', { focus: false }), 300); return 'Mailbox added.'; } }));
   });
-  loadFolders(); loadList(); loadQueue(); loadGrants(); loadContacts();
+  // Seal on arrival: mail to these mailboxes is encrypted for the project's sealing keys, kept as a sealed record and
+  // erased from the mailbox. The list is project policy, changed by an administrator.
+  const loadSealed = () => section(sealedR.body, async () => ({ status: await appApi('/v1/correspondence/sealed-mailboxes', { purpose: ctx.purpose }), mailboxes: await api('correspondence', '/v1/mailboxes', { purpose: ctx.purpose }).catch(() => []) }), ({ status, mailboxes }, body) => {
+    body.append(h('p', { class: 'pam-intro', text: 'Mail that arrives in a sealed mailbox is encrypted on arrival for the researchers’ sealing keys, stored as a sealed record under a code name for the sender (S-1, S-2…), and then erased from the mailbox. Only a tombstone stays here; the text, attachments, subject and addresses can be read only with a researcher’s key on the Sealed sources page. Mail that arrived before a mailbox was sealed is not changed.' }));
+    if (status.sealingKeys === 0) body.append(h('p', { class: 'ws-notice ws-notice--warn', text: 'No sealing key is registered in this project. Mail to a sealed mailbox stays readable and is NOT erased until a researcher creates a key (Sealed sources page); each such message is listed under Needs attention.' }));
+    if (!status.senderKeyConfigured) body.append(h('p', { class: 'ws-notice ws-notice--warn', text: 'The server has no SEALED_MAIL_HMAC_KEY: mail is still sealed and erased, but each message gets a new code name because the sender cannot be recognised again.' }));
+    const sealed = new Set(status.mailboxIds ?? []);
+    if (mailboxes.length === 0) { renderEmpty(body.appendChild(h('div', {})), 'No mailbox configured', 'Add a mailbox first.'); return; }
+    table(body, { caption: 'Sealing per mailbox', rows: mailboxes.map((m) => ({ address: m.address, sealed: sealed.has(m.id) ? 'sealed on arrival' : 'not sealed', counts: status.messages?.[m.id] ?? {} })), rowHeader: 'address', columns: [
+      { key: 'address', label: 'Mailbox' }, { key: 'sealed', label: 'Sealing' },
+      { key: 'counts', label: 'Messages sealed and erased / waiting for a key / in progress', sortable: false, render: (r) => h('span', { text: `${r.counts.erased ?? 0} / ${r.counts.waiting_for_keys ?? 0} / ${(r.counts.pending ?? 0) + (r.counts.sealed ?? 0)}` }) }] });
+    body.append(form({ legend: 'Choose the sealed mailboxes (administration purpose)', submit: 'Save sealed mailboxes', resetOnSuccess: false,
+      fields: mailboxes.map((m, i) => ({ name: `m${i}`, label: `Seal mail to ${m.address} on arrival`, type: 'checkbox', value: sealed.has(m.id) })),
+      onSubmit: async (v) => { const ids = mailboxes.filter((_m, i) => v[`m${i}`]).map((m) => m.id); await appApi('/v1/correspondence/sealed-mailboxes', { method: 'PUT', purpose: 'administration', body: { mailboxIds: ids } }); const msg = ids.length ? `${ids.length} mailbox(es) now seal mail on arrival.` : 'No mailbox seals mail on arrival.'; announce(msg); setTimeout(loadSealed, 0); return msg; } }));
+  });
+  loadFolders(); loadList(); loadQueue(); loadGrants(); loadContacts(); loadSealed();
 }
 
 function message(ctx, m) {
   const el = h('article', { class: 'pam-message', 'aria-label': `Message from ${m.fromAddr}` });
   el.append(h('p', {}, h('strong', { text: m.fromName ? `${m.fromName} <${m.fromAddr}>` : m.fromAddr }), h('span', { class: 'ws-muted', text: ` to ${(m.toAddrs ?? []).join(', ')} · ${m.state} · ${m.receivedAt ?? m.sentAt ?? m.createdAt ?? ''}` })));
+  if (m.contentErased) { el.append(h('p', { class: 'ws-notice', text: m.tombstone ?? 'Content sealed and erased.' }), h('p', {}, 'Preserved as ', ref(m.preservedAs), '. Open it on the Sealed sources page with your sealing key.')); return el; }
   if (m.trust === 'untrusted_external_content') el.append(h('p', { class: 'ws-notice ws-notice--warn', text: 'External message: its content is unverified and is shown as text.' }));
   el.append(h('pre', { tabindex: '0', text: m.bodyText || '(no text part)' }));
   // Inbound mail may carry an HTML version. Only the engine's allow-listed rendering (`sanitizedHtml`) is ever shown, in a
