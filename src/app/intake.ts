@@ -4,6 +4,10 @@
 //   attachment.released  → preserves the released bytes in E05 with E02's digest and custody history carried over;
 //   case.opened          → opens an investigation in E08 whose original account is the preserved copy.
 // Quarantined or blocked uploads are never fetched (E02 refuses to serve them). Protected fields are never requested.
+// Sealed answers (encrypted in the participant's browser to the project's public sealing keys) arrive as a ciphertext
+// envelope only: the submission gets a source code name (S-n, channel 'intake'; one per submission, kept in
+// intake_sealed_sources so later envelopes reuse it) and the envelope is stored as a sealed record (E05). The account
+// copy references the sealed record instead of any plaintext; PAM never holds sealed answers in clear.
 // Credentials are deployment secrets (environment), never stored in the database: PAM_INTAKE_LINKS =
 //   {"<PAM organization id>": {"baseUrl": "https://intake.example.org/api/v1", "token": "sicwe_…"}}
 import { createHash } from 'node:crypto';
@@ -12,6 +16,7 @@ import type { Json } from '../contracts.ts';
 import type { ServiceContext } from '../service-kit.ts';
 import { APP_SCHEMA } from './compose.ts';
 import type { Runtime } from './compose.ts';
+import { activeRecipients, checkEnvelope, createSourceCode, storeSealedRecord } from './sealed.ts';
 
 export type IntakeLink = Readonly<{ baseUrl: string; token: string }>;
 export function intakeLinks(env: Readonly<Record<string, string | undefined>>): Map<string, IntakeLink> {
@@ -35,8 +40,12 @@ async function call(link: IntakeLink, path: string, raw = false): Promise<{ stat
   return { status: response.status, json, bytes, headers: response.headers };
 }
 
+export const INTAKE_LINKS_DDL = `create table if not exists ${APP_SCHEMA}.intake_links (tenant_id text not null, intake_kind text not null, intake_id text not null, pam_ref text not null, created_at timestamptz not null default now(), primary key (tenant_id, intake_kind, intake_id))`;
+// Intake submission → sealed source code name. Holds no identity: only the intake submission id and the code.
+export const INTAKE_SEALED_SOURCES_DDL = `create table if not exists ${APP_SCHEMA}.intake_sealed_sources (tenant_id text not null, project_id text not null, intake_submission_id text not null, source_code text not null, created_at timestamptz not null default now(), primary key (tenant_id, intake_submission_id))`;
 export async function migrateIntake(runtime: Runtime): Promise<void> {
-  await runtime.sql.query(`create table if not exists ${APP_SCHEMA}.intake_links (tenant_id text not null, intake_kind text not null, intake_id text not null, pam_ref text not null, created_at timestamptz not null default now(), primary key (tenant_id, intake_kind, intake_id))`);
+  await runtime.sql.query(INTAKE_LINKS_DDL);
+  await runtime.sql.query(INTAKE_SEALED_SOURCES_DDL);
 }
 async function link(runtime: Runtime, tenantId: string, kind: string, id: string): Promise<string | null> {
   return ((await runtime.sql.query<{ pam_ref: string }>(`select pam_ref from ${APP_SCHEMA}.intake_links where tenant_id=$1 and intake_kind=$2 and intake_id=$3`, [tenantId, kind, id]))[0]?.pam_ref) ?? null;
@@ -46,19 +55,56 @@ async function remember(runtime: Runtime, tenantId: string, kind: string, id: st
 }
 const uuidish = (v: unknown): string => { const s = String(v); if (!/^[A-Za-z0-9._~-]{1,128}$/.test(s)) throw new DomainError('invalid_input', 'Unexpected intake identifier'); return s; };
 
+const RISK_LEVELS = ['low', 'medium', 'high', 'severe'];
+
+/** The source code name for an intake submission's sealed answers: created once, then reused. */
+async function sealedSourceFor(runtime: Runtime, ctx: ServiceContext, submissionId: string, risk: string): Promise<string> {
+  const find = async (): Promise<string | null> => (await runtime.sql.query<{ source_code: string }>(`select source_code from ${APP_SCHEMA}.intake_sealed_sources where tenant_id=$1 and intake_submission_id=$2`, [ctx.tenantId, submissionId]))[0]?.source_code ?? null;
+  const existing = await find();
+  if (existing !== null) return existing;
+  const code = await createSourceCode(runtime, ctx, { channel: 'intake', risk, note: 'Sealed intake submission' });
+  await runtime.sql.query(`insert into ${APP_SCHEMA}.intake_sealed_sources (tenant_id, project_id, intake_submission_id, source_code) values ($1,$2,$3,$4) on conflict do nothing`, [ctx.tenantId, ctx.projectId, submissionId, code]);
+  // A concurrent pass may have won; everyone uses the recorded code (an unused code name may remain).
+  return (await find()) ?? code;
+}
+
+type SealedImport = { recordId: string; evidenceRef: string; sourceCode: string; commitment: string; fieldIds: string[]; unregisteredKeys: number };
+/** Brings a submission's sealed envelope in as a sealed record. Only ciphertext is fetched; nothing is decrypted. */
+async function preserveSealed(runtime: Runtime, ctx: ServiceContext, intake: IntakeLink, submissionId: string, summary: Any): Promise<SealedImport> {
+  const fieldIds = Array.isArray(summary.fieldIds) ? (summary.fieldIds as unknown[]).map(String) : [];
+  const data = (await call(intake, `/submissions/${submissionId}/sealed`)).json.data as Any;
+  const envelope = data?.envelope as Json;
+  const checked = checkEnvelope(envelope);
+  if (checked.commitment !== data.commitment || checked.commitment !== summary.commitment) throw new DomainError('integrity_failed', 'The intake sealed envelope does not match its recorded fingerprint');
+  const risk = RISK_LEVELS.includes(summary.sourceRiskLevel) ? summary.sourceRiskLevel as string : 'high';
+  const sourceCode = await sealedSourceFor(runtime, ctx, submissionId, risk);
+  const receivedAt = typeof data.receivedAt === 'string' && /^\d{4}-\d{2}-\d{2}/.test(data.receivedAt) ? data.receivedAt.slice(0, 10) : null;
+  const stored = await storeSealedRecord(runtime, ctx, { sourceCode, kind: 'document', occurredOn: receivedAt, envelope, originLabel: `Sealed intake answers from source ${sourceCode} (intake); encrypted in the participant's browser` });
+  await remember(runtime, ctx.tenantId, 'sealed_submission', submissionId, stored.evidenceRef);
+  const registered = new Set((await activeRecipients(runtime, ctx)).map((k) => k.id));
+  return { recordId: stored.id, evidenceRef: stored.evidenceRef, sourceCode, commitment: stored.commitment, fieldIds, unregisteredKeys: checked.recipients.filter((k) => !registered.has(k)).length };
+}
+
 async function preserveAccount(runtime: Runtime, ctx: ServiceContext, intake: IntakeLink, submissionId: string): Promise<string> {
   const existing = await link(runtime, ctx.tenantId, 'submission', submissionId);
   if (existing !== null) return existing;
   const s = (await call(intake, `/submissions/${submissionId}`)).json.data as Any;
   const account = s.originalAccount as Any;
+  // Sealed answers never travel in clear. If a sealed field ever appeared among the ordinary answers, nothing is copied.
+  const sealedIds: string[] = [...new Set<string>([...((s.form?.fields ?? []) as Any[]).filter((f) => f.sealed === true).map((f) => String(f.id)), ...((s.sealed?.fieldIds ?? []) as unknown[]).map(String)])];
+  if (sealedIds.some((id) => Object.hasOwn(account.answers ?? {}, id))) throw new DomainError('integrity_failed', 'Intake returned a sealed field among the ordinary answers; the submission is not copied');
+  const sealed = s.sealed ? await preserveSealed(runtime, ctx, intake, submissionId, s.sealed as Any) : null;
   // E02's digest is over the answers alone; it is re-checked here before the copy is preserved.
   const recomputed = createHash('sha256').update(canonical(account.answers)).digest('hex');
-  const copy = { schema: 'intake-original-account-copy/v1', owner: 'E02', submission: `E02:submission:${submissionId}`, form: { slug: s.form?.slug, versionNumber: s.form?.versionNumber, fields: (s.form?.fields ?? []).map((f: Any) => ({ id: f.id, label: f.label, protected: f.protected })) },
+  const copy = { schema: 'intake-original-account-copy/v1', owner: 'E02', submission: `E02:submission:${submissionId}`, form: { slug: s.form?.slug, versionNumber: s.form?.versionNumber, fields: (s.form?.fields ?? []).map((f: Any) => ({ id: f.id, label: f.label, protected: f.protected, sealed: f.sealed === true })) },
     locale: s.locale, channel: s.channel, submittedAt: s.submittedAt, answers: account.answers, protectedFieldsWithheld: (s.protectedCompartments ?? []).flatMap((c: Any) => c.fieldIds ?? []),
+    sealedFieldsWithheld: sealedIds,
+    sealedRecord: sealed === null ? null : { id: sealed.recordId, evidenceRef: sealed.evidenceRef, sourceCode: sealed.sourceCode, commitment: sealed.commitment, kind: 'document', unregisteredKeys: sealed.unregisteredKeys,
+      note: 'Sealed answers are held only as ciphertext in the sealed record; open it in Sealed sources or with the offline sealed reader.' },
     intakeDigest: { sha256: account.sha256, recordedSha256: account.recordedSha256, canonicalization: account.canonicalization, matchesRecord: account.digestMatchesRecord === true, recomputedByPam: recomputed, consistent: recomputed === account.sha256 } };
   const bytes = new TextEncoder().encode(`${JSON.stringify(copy, null, 2)}\n`);
   const info = await runtime.get('evidence').accept(ctx, { bytes, mediaType: 'application/json', filename: `original-account-${submissionId}.json`, idempotencyKey: `intake-account-${submissionId}`,
-    origin: { kind: 'intake_submission', owner: 'E02', ownerRef: `E02:submission:${submissionId}`, note: 'Copy of the immutable original account. The original remains owned by the intake engine; protected fields were not copied.', intakeSha256: account.sha256, digestConsistent: recomputed === account.sha256, submittedAt: s.submittedAt } as Json }) as { ref: string };
+    origin: { kind: 'intake_submission', owner: 'E02', ownerRef: `E02:submission:${submissionId}`, note: `Copy of the immutable original account. The original remains owned by the intake engine; protected fields were not copied.${sealed === null ? '' : ` Sealed answers are in sealed record ${sealed.recordId} (source ${sealed.sourceCode}), not in this copy.`}`, ...(sealed === null ? {} : { sealedRecord: sealed.evidenceRef }), intakeSha256: account.sha256, digestConsistent: recomputed === account.sha256, submittedAt: s.submittedAt } as Json }) as { ref: string };
   await remember(runtime, ctx.tenantId, 'submission', submissionId, info.ref);
   return info.ref;
 }
@@ -84,10 +130,11 @@ async function openInvestigation(runtime: Runtime, ctx: ServiceContext, intake: 
   const existing = await link(runtime, ctx.tenantId, 'case', caseId);
   if (existing !== null) return existing;
   const accountRef = await preserveAccount(runtime, ctx, intake, submissionId);
+  const sealedRef = await link(runtime, ctx.tenantId, 'sealed_submission', submissionId);
   const kase = (await call(intake, `/cases/${caseId}`)).json.data as Any;
   const inv = await runtime.get('investigation').openInvestigation(ctx, { title: `Intake case ${String(kase.caseNumber ?? kase.reference ?? caseId).slice(0, 80)}`, originRef: `E02:case:${caseId}`,
     scopeStatement: 'Investigate the account received through intake: what happened, what supports or contradicts it, and what remains unknown.',
-    originalAccount: { ref: accountRef, summary: 'The participant\'s original account is preserved unchanged as referenced evidence.', label: 'allegation' }, idempotencyKey: `intake-case-${caseId}` }) as { ref: string };
+    originalAccount: { ref: accountRef, summary: `The participant's original account is preserved unchanged as referenced evidence.${sealedRef === null ? '' : ` Their sealed answers are sealed record ${sealedRef} (ciphertext; readable only with a project sealing key).`}`, label: 'allegation' }, idempotencyKey: `intake-case-${caseId}` }) as { ref: string };
   await remember(runtime, ctx.tenantId, 'case', caseId, inv.ref);
   return inv.ref;
 }
@@ -121,4 +168,4 @@ export async function syncIntakeOnce(runtime: Runtime): Promise<IntakeReport> {
   return report;
 }
 /** PAM reference recorded for an intake object, if it has been brought in. */
-export function intakeRef(runtime: Runtime, tenantId: string, kind: 'submission' | 'document_version' | 'case', id: string): Promise<string | null> { return link(runtime, tenantId, kind, id); }
+export function intakeRef(runtime: Runtime, tenantId: string, kind: 'submission' | 'document_version' | 'case' | 'sealed_submission', id: string): Promise<string | null> { return link(runtime, tenantId, kind, id); }

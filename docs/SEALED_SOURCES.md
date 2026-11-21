@@ -50,8 +50,25 @@ conversation on a date — not what was said, and not who S-17 is.
   messages on Signal and full-disk encryption.
 - **Metadata outside PAM.** Signal, email and phone networks see who contacted whom. Prefer Signal usernames and the intake
   onion address for people connected to Iran or other repressive states.
-- **Not yet sealed:** the intake application's own submissions and the correspondence engine's email (planned next:
-  encrypt intake submissions in the participant's browser to the project keys, and seal inbound email on arrival).
+- **Not yet sealed:** the correspondence engine's email (planned: seal inbound email on arrival), and intake answers
+  in fields the intake form does not mark `sealed`.
+
+## Sealed intake submissions
+
+Intake form fields marked `"sealed": true` are encrypted in the participant's browser (the intake application carries a
+byte-identical copy of `web/js/sealed-crypto.js`) for the keys in the intake deployment's `SEALING_RECIPIENTS` — set it to
+the project's public keys exactly as `GET /v1/sealed/keys` lists them (`keyId`, `label`, `publicJwk`). The intake server
+stores only the envelope. The intake bridge (`src/app/intake.ts`) then, for each such submission:
+
+- creates a code name (channel `intake`, risk from the form's `sealing.sourceRiskLevel`, otherwise `high`) once, recorded
+  in `pam_app.intake_sealed_sources` (intake submission id → code; no identity) so later envelopes reuse it;
+- stores the envelope as a sealed record of kind `document` (E05, `application/vnd.pam.sealed+json`);
+- writes the account copy with the ordinary answers only, `sealedFieldsWithheld` and a `sealedRecord` reference, and names
+  the sealed record in the original-account summary of the investigation opened for the case.
+
+The copy records `unregisteredKeys`: envelopes sealed for keys not registered in the project (a misconfigured intake
+deployment) are still kept, but only holders of those keys can open them. When a key is added to the project, update
+`SEALING_RECIPIENTS` in the intake deployment too.
 
 ## Offline reader and re-sealing
 

@@ -105,7 +105,9 @@ export async function compose(env: Env, options: { actions?: (runtime: Runtime) 
   const model = options.model === undefined ? modelFromEnv(env) : options.model;
   const entries = new Map<string, EngineEntry>();
   const doMigrate = options.migrate !== false;
-  if (doMigrate) { await migrateApp(sql); await orchestrationModule.migrate(sql); await sql.query(`create table if not exists ${APP_SCHEMA}.intake_links (tenant_id text not null, intake_kind text not null, intake_id text not null, pam_ref text not null, created_at timestamptz not null default now(), primary key (tenant_id, intake_kind, intake_id))`); }
+  if (doMigrate) { await migrateApp(sql); await orchestrationModule.migrate(sql); await sql.query(`create table if not exists ${APP_SCHEMA}.intake_links (tenant_id text not null, intake_kind text not null, intake_id text not null, pam_ref text not null, created_at timestamptz not null default now(), primary key (tenant_id, intake_kind, intake_id))`);
+    // Intake submission → sealed source code name (see intake.ts); no identity is stored.
+    await sql.query(`create table if not exists ${APP_SCHEMA}.intake_sealed_sources (tenant_id text not null, project_id text not null, intake_submission_id text not null, source_code text not null, created_at timestamptz not null default now(), primary key (tenant_id, intake_submission_id))`); }
 
   const maybe = (short: string): AnyEngine | null => entries.get(short)?.engine ?? null;
   const runtimeRef: { current: Runtime | null } = { current: null };

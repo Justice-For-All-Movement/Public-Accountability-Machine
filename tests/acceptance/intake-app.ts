@@ -27,7 +27,7 @@ const run = (cmd: string, args: string[], env: NodeJS.ProcessEnv): Promise<void>
 export type IntakeApp = { origin: string; apiBase: string; slug: string; token: string; tokenB: string; slugB: string; workDir: string;
   api(token: string, method: string, path: string, body?: unknown): Promise<{ status: number; body: any }>; close(): Promise<void> };
 
-export async function startIntake(adminUrl: string): Promise<IntakeApp> {
+export async function startIntake(adminUrl: string, extraEnv: Record<string, string> = {}): Promise<IntakeApp> {
   const name = `pam_intake_${randomBytes(5).toString('hex')}`;
   const admin = new pg.Pool({ connectionString: adminUrl, max: 1 });
   await admin.query(`create database ${name}`);
@@ -39,7 +39,7 @@ export async function startIntake(adminUrl: string): Promise<IntakeApp> {
   const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: 'production', DATABASE_URL: url.toString(), APP_BASE_URL: `http://127.0.0.1:${port}`,
     PROTECTED_DATA_ENCRYPTION_KEY: randomBytes(32).toString('hex'), WEBHOOK_ENCRYPTION_KEY: randomBytes(32).toString('hex'),
     PLATFORM_API_TOKEN_SHA256: createHash('sha256').update(platformToken).digest('hex'), DOCUMENT_STORAGE_DRIVER: 'local', DOCUMENT_STORAGE_ROOT: join(workDir, 'documents'),
-    MALWARE_SCANNER_DRIVER: 'clamscan', CLAMSCAN_DATABASE_DIR: signatures, BACKGROUND_JOB_POLL_MS: '200', AUTH_LOGIN_FAILURE_LIMIT: '50', API_DEFAULT_RATE_LIMIT_PER_MINUTE: '5000' };
+    MALWARE_SCANNER_DRIVER: 'clamscan', CLAMSCAN_DATABASE_DIR: signatures, BACKGROUND_JOB_POLL_MS: '200', AUTH_LOGIN_FAILURE_LIMIT: '50', API_DEFAULT_RATE_LIMIT_PER_MINUTE: '5000', ...extraEnv };
   const children: ChildProcess[] = [];
   const close = async (): Promise<void> => {
     for (const c of children) c.kill('SIGTERM');
