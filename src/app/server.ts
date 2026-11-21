@@ -19,12 +19,13 @@ import type { RouterReport } from './router.ts';
 import { intakeLinks, syncIntakeOnce } from './intake.ts';
 import { closeInterruptedActionRuns, gatewayCheck, researchRoutes } from './research.ts';
 import { sealedRoutes } from './sealed.ts';
+import { sealPendingMailOnce, sealedMailRoutes } from './sealed-mail.ts';
 import type { IntakeReport } from './intake.ts';
 
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.map': 'application/json' };
 const SECURITY_HEADERS = { 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer', 'content-security-policy': "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'" };
 
-export type AppState = { lastIntake?: IntakeReport; lastHousekeeping?: { at: string; licencesExpiringNotified: number; conversationsWithoutResponse: number; errors: string[] }; lastRouter: RouterReport | null; lastWorkerError: string | null; workerPasses: number; startedAt: string };
+export type AppState = { lastIntake?: IntakeReport; lastSealedMail?: { attempted: number; erased: number; error?: string }; lastHousekeeping?: { at: string; licencesExpiringNotified: number; conversationsWithoutResponse: number; errors: string[] }; lastRouter: RouterReport | null; lastWorkerError: string | null; workerPasses: number; startedAt: string };
 
 export function appRoutes(runtime: Runtime, state: AppState, extra: (runtime: Runtime) => Route[] = () => []): Route[] {
   return [
@@ -104,6 +105,8 @@ export function appRoutes(runtime: Runtime, state: AppState, extra: (runtime: Ru
     ...researchRoutes(runtime),
     // Sealed records: encrypted in the browser; the server holds ciphertext, code names and commitments (src/app/sealed.ts).
     ...sealedRoutes(runtime),
+    // Sealed mailboxes: which mailboxes seal inbound mail on arrival (src/app/sealed-mail.ts).
+    ...sealedMailRoutes(runtime),
     ...extra(runtime),
   ];
 }
@@ -170,6 +173,8 @@ export async function workerPass(runtime: Runtime, state: AppState, worker: stri
     const intake = await syncIntakeOnce(runtime);
     state.lastIntake = intake;
     state.lastRouter = await routeEventsOnce(runtime);
+    // Sealed mailboxes: retry messages waiting for a sealing key or whose sealing or erasure failed earlier.
+    try { state.lastSealedMail = await sealPendingMailOnce(runtime); } catch (error) { state.lastSealedMail = { attempted: 0, erased: 0, error: error instanceof Error ? error.message : String(error) }; }
     await housekeeping(runtime, state);
     // An engine job pass that failed since the last pass is reported now (it ran outside this pass).
     state.lastWorkerError = engineErrors.get(runtime) ?? null; engineErrors.delete(runtime);

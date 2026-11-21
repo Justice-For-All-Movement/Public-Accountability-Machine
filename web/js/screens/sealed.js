@@ -113,7 +113,10 @@ export async function render(el, ctx) {
         const { content, commitmentVerified } = await sc.open(env, mine.id, mine.privateKey);
         viewer.replaceChildren(h('h3', { text: `${r.sourceCode} · ${r.kind}${r.occurredOn ? ` · ${r.occurredOn}` : ''}` }),
           h('p', { class: commitmentVerified ? 'ws-notice' : 'ws-notice ws-notice--warn', text: commitmentVerified ? 'Fingerprint verified: this is the original as sealed.' : 'Fingerprint does NOT match: this content is not what was sealed.' }),
+          // Sealed email carries its headers inside the ciphertext; shown as text only.
+          ...(content.headers ? [h('pre', { text: [['From', [content.headers.fromName, content.headers.from].filter(Boolean).join(' ')], ['To', (content.headers.to ?? []).join(', ')], ['Cc', (content.headers.cc ?? []).join(', ')], ['Subject', content.headers.subject], ['Date', content.headers.date], ['Message-ID', content.headers.messageId]].filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join('\n') })] : []),
           h('pre', { text: content.text || '(no text)' }),
+          ...(content.html ? [h('p', { class: 'ws-muted', text: 'This email also has an HTML version; it is kept in the sealed record and not rendered here.' })] : []),
           ...(content.files ?? []).map((x) => h('p', {}, h('a', { href: URL.createObjectURL(new Blob([sc.unb64(x.base64)], { type: x.type })), download: x.name, text: `Download ${x.name}` }))),
           action('Close', async () => { viewer.replaceChildren(); return 'Closed.'; }));
         return 'Decrypted on this device only.';

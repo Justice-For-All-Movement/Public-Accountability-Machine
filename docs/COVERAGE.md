@@ -83,6 +83,14 @@ Acceptance tests (in `tests/acceptance/`): **A** intake → findings and deliver
   pages with matching data. The container image takes `OCR_LANGUAGES` as a build argument.
 - Guide: `docs/RECORDS_ACROSS_SOURCES.md`.
 
+## Added in session 5 (seal on arrival)
+
+- E03 `eraseMessageContent` / `POST /v1/messages/:id/erase-content` (exact `correspondence:erase`; E03 PR #8, pinned
+  `7485711`): readable content, bytes and derived text removed after preservation elsewhere; tombstone views; idempotent.
+- PAM sealed mailboxes (`src/app/sealed-mail.ts`, `docs/SEALED_SOURCES.md`): inbound mail sealed for the project keys,
+  stored as a sealed record per sender code (keyed-hash mapping), then erased from E03; no keys → no erase + alert.
+  Acceptance test H (`tests/acceptance/h-sealed-mail.test.ts`) scans every table of every schema and every stored object.
+
 ## Open items (honest list)
 
 - **Live providers**: mail (SMTP/IMAP/Gmail/Graph), OIDC, S3, Stripe, ASR/translation/generation providers, webhook

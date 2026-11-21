@@ -27,6 +27,7 @@ services:
       - { key: IDENTITY_KEY_ENCRYPTION_KEY, sync: false }
       - { key: EVIDENCE_MASTER_KEY, sync: false }
       - { key: CORRESPONDENCE_SECRET_KEY, sync: false }
+      - { key: SEALED_MAIL_HMAC_KEY, sync: false }     # sealed mailboxes: keyed hash of sender addresses
       - { key: RELEASE_DOWNLOAD_SECRET, sync: false }
       - { key: PAM_INTAKE_LINKS, sync: false }
   - type: worker
@@ -50,6 +51,7 @@ envVarGroups:
       - { key: IDENTITY_KEY_ENCRYPTION_KEY, sync: false }
       - { key: EVIDENCE_MASTER_KEY, sync: false }
       - { key: CORRESPONDENCE_SECRET_KEY, sync: false }
+      - { key: SEALED_MAIL_HMAC_KEY, sync: false }
       - { key: PAM_INTAKE_LINKS, sync: false }
 # Note: the worker needs system tools (poppler, tesseract, ffmpeg, libreoffice, pandoc, imagemagick, exiftool, sox,
 # fluidsynth + GM soundfont, espeak-ng, clamav). Render's native Node runtime does not include them; a Docker-based

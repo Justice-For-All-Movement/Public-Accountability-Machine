@@ -16,6 +16,7 @@ import type { ModelPort } from './model.ts';
 import { editorialModelPort } from './agents.ts';
 import { migrateResearch, recordedAction } from './research.ts';
 import { migrateSealed } from './sealed.ts';
+import { migrateSealedMail } from './sealed-mail.ts';
 import type { OrchestrationEngine } from '../orchestration/index.ts';
 
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -81,6 +82,14 @@ function jobRunner(short: string, engine: AnyEngine): (() => Promise<number>) | 
 
 export const APP_SCHEMA = 'pam_app';
 export async function migrateApp(sql: Sql): Promise<void> {
+  // Processes starting together (web, workers) would otherwise run the same DDL concurrently, which PostgreSQL can refuse
+  // ("tuple concurrently updated"): the application schema is migrated by one process at a time, in one transaction.
+  await sql.tx(async (tx) => {
+    await tx.query('select pg_advisory_xact_lock(hashtext($1))', [`${APP_SCHEMA}:migrate`]);
+    await migrateAppSchema(tx);
+  });
+}
+async function migrateAppSchema(sql: Sql): Promise<void> {
   await sql.query(`create schema if not exists ${APP_SCHEMA}`);
   await sql.query(`create table if not exists ${APP_SCHEMA}.tenants (tenant_id text primary key, orchestrator_service_id text not null, home_project_id text not null, provisioned_at timestamptz not null default now())`);
   // Attention items recorded by the event router from engine events (ids and types only; content stays in the engines).
@@ -92,6 +101,8 @@ export async function migrateApp(sql: Sql): Promise<void> {
   await migrateResearch(sql);
   // Sealed records: public sealing keys, source code names, sealed record index (content is ciphertext in E05).
   await migrateSealed(sql);
+  // Seal on arrival for sealed mailboxes: progress per message and the keyed-hash sender → code mapping (no addresses).
+  await migrateSealedMail(sql);
 }
 
 export async function compose(env: Env, options: { actions?: (runtime: Runtime) => Record<string, orchestrationModule.ActionDefinition>; migrate?: boolean; model?: ModelPort | null } = {}): Promise<Runtime> {
@@ -295,7 +306,10 @@ export async function alignRoleCatalog(runtime: Runtime, ctx: ServiceContext): P
     // Handing an approved editorial revision to production, and exporting finished renders, are exact sensitive actions.
     editor: ['editorial:export'], producer: ['production:export'],
     // A human operator approves or rejects work that agents or models proposed; exporting the audit trail is exact.
-    admin: ['orchestration:approve', 'workspace:export'] };
+    admin: ['orchestration:approve', 'workspace:export'],
+    // Seal on arrival: after a message from a sealed mailbox is stored as a sealed record, PAM's service erases its readable
+    // content from the correspondence engine, which requires this exact capability.
+    service_orchestrator: ['correspondence:erase'] };
   for (const [name, add] of Object.entries(wanted)) {
     const role = roles.find((r) => r.name === name);
     if (role === undefined || add.every((c) => role.capabilities.includes(c))) continue;
